@@ -34,6 +34,18 @@ body {
   cursor: pointer;
 }
 .new-post-link:disabled { opacity: 0.6; cursor: default; }
+
+/* Unsaved indicator: black filled circle in top-right */
+.unsaved-indicator {
+  position: fixed;
+  top: 12px;
+  right: 16px;
+  width: 10px;
+  height: 10px;
+  background: #000;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.9);
+}
 header h1 {
   margin: 0 0 12px;
   font-family: 'Space Grotesk', sans-serif;

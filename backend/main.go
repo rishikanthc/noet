@@ -15,6 +15,47 @@ import (
     "time"
 )
 
+// helper to extract first <h1> inner text from HTML
+// naive but sufficient for simple titles without external deps
+func extractTitleFromHTML(htmlStr string) string {
+    lower := strings.ToLower(htmlStr)
+    start := strings.Index(lower, "<h1")
+    if start == -1 {
+        return ""
+    }
+    // find end of opening tag '>'
+    gt := strings.Index(lower[start:], ">")
+    if gt == -1 {
+        return ""
+    }
+    gtAbs := start + gt + 1
+    // find closing tag
+    endTag := strings.Index(lower[gtAbs:], "</h1>")
+    if endTag == -1 {
+        return ""
+    }
+    inner := htmlStr[gtAbs : gtAbs+endTag]
+    // strip inner HTML tags crudely
+    var b strings.Builder
+    inTag := false
+    for _, r := range inner {
+        switch r {
+        case '<':
+            inTag = true
+        case '>':
+            inTag = false
+        default:
+            if !inTag {
+                b.WriteRune(r)
+            }
+        }
+    }
+    title := strings.TrimSpace(b.String())
+    // collapse whitespace
+    title = strings.Join(strings.Fields(title), " ")
+    return title
+}
+
 //go:embed static/*
 var staticFS embed.FS
 
@@ -30,6 +71,7 @@ func main() {
     // Simple in-memory notes store
     type Note struct {
         ID        string    `json:"id"`
+        Title     string    `json:"title"`
         Content   string    `json:"content"`
         CreatedAt time.Time `json:"createdAt"`
         UpdatedAt time.Time `json:"updatedAt"`
@@ -51,7 +93,7 @@ func main() {
             }
             id := hex.EncodeToString(b[:])
             now := time.Now()
-            n := &Note{ID: id, Content: "", CreatedAt: now, UpdatedAt: now}
+            n := &Note{ID: id, Title: "", Content: "", CreatedAt: now, UpdatedAt: now}
             notesMu.Lock()
             notes[id] = n
             notesMu.Unlock()
@@ -69,27 +111,55 @@ func main() {
         }
     })
 
-    // GET /api/notes/{id}
+    // GET/PUT /api/notes/{id}
     mux.HandleFunc("/api/notes/", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodGet {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
         id := strings.TrimPrefix(r.URL.Path, "/api/notes/")
         if id == "" {
             http.NotFound(w, r)
             return
         }
-        notesMu.RLock()
-        n, ok := notes[id]
-        notesMu.RUnlock()
-        if !ok {
-            http.NotFound(w, r)
+        switch r.Method {
+        case http.MethodGet:
+            notesMu.RLock()
+            n, ok := notes[id]
+            notesMu.RUnlock()
+            if !ok {
+                http.NotFound(w, r)
+                return
+            }
+            w.Header().Set("Content-Type", "application/json")
+            _ = json.NewEncoder(w).Encode(n)
+            return
+        case http.MethodPut:
+            var payload struct {
+                Content string `json:"content"`
+            }
+            if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+                http.Error(w, "invalid json", http.StatusBadRequest)
+                return
+            }
+            now := time.Now()
+            notesMu.Lock()
+            n, ok := notes[id]
+            if !ok {
+                notesMu.Unlock()
+                http.NotFound(w, r)
+                return
+            }
+            n.Content = payload.Content
+            n.Title = extractTitleFromHTML(payload.Content)
+            n.UpdatedAt = now
+            notesMu.Unlock()
+            w.Header().Set("Content-Type", "application/json")
+            _ = json.NewEncoder(w).Encode(n)
+            return
+        default:
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
         }
-        w.Header().Set("Content-Type", "application/json")
-        _ = json.NewEncoder(w).Encode(n)
     })
+
+    
 
     // Serve embedded static frontend
     mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
