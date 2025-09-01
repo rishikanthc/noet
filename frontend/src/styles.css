@@ -23,6 +23,14 @@ body {
   min-height: 100vh;
   background: #ffffff;
 }
+.home-content { padding: 56px 24px 24px; max-width: 900px; margin: 0 auto; }
+.home-content h1 { margin: 0 0 12px; font-family: 'Space Grotesk', sans-serif; }
+.post-list { list-style: none; padding: 0; margin: 12px 0 0; }
+.post-list li { border-bottom: 1px solid #eee; }
+.post-link { display: flex; justify-content: space-between; align-items: center; padding: 12px 4px; text-decoration: none; color: inherit; }
+.post-link:hover { background: #fafafa; }
+.post-title { font-weight: 600; }
+.post-meta { color: var(--muted); font-size: 12px; }
 .new-post-link {
   position: absolute;
   top: 16px;

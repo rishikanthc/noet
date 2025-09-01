@@ -2,8 +2,32 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Editor, { type EditorRef } from '@quill/Editor'
 import './styles.css'
 
+type Note = { id: string; title?: string; content?: string; createdAt?: string; updatedAt?: string }
+
 function Home() {
   const [creating, setCreating] = useState(false)
+  const [posts, setPosts] = useState<Note[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | undefined>()
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch('/api/notes')
+        if (!res.ok) throw new Error(`Failed to load posts: ${res.status}`)
+        const list = await res.json()
+        if (!cancelled) setPosts(list)
+      } catch (e: any) {
+        console.error(e)
+        if (!cancelled) setError(e?.message || 'Failed to load posts')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [])
 
   const handleNewPost = async () => {
     if (creating) return
@@ -26,6 +50,29 @@ function Home() {
       <button className="new-post-link" onClick={handleNewPost} disabled={creating}>
         New Post
       </button>
+      <div className="home-content">
+        <h1>All Posts</h1>
+        {loading && <p>Loading…</p>}
+        {error && <p>{error}</p>}
+        {!loading && !error && (
+          posts.length === 0 ? (
+            <p>No posts yet. Click “New Post”.</p>
+          ) : (
+            <ul className="post-list">
+              {posts.map(p => (
+                <li key={p.id}>
+                  <a href={`/posts/${p.id}`} className="post-link">
+                    <span className="post-title">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
+                    {p.updatedAt && (
+                      <span className="post-meta">{new Date(p.updatedAt).toLocaleString()}</span>
+                    )}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+      </div>
     </div>
   )
 }

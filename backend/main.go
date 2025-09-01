@@ -8,6 +8,7 @@ import (
     "log"
     "mime"
     "net/http"
+    "sort"
     "path"
     "path/filepath"
     "strings"
@@ -102,8 +103,25 @@ func main() {
             _ = json.NewEncoder(w).Encode(n)
             return
         case http.MethodGet:
-            // Optional: list notes in future
-            http.Error(w, "not implemented", http.StatusNotImplemented)
+            // List notes sorted by UpdatedAt desc (then CreatedAt desc)
+            notesMu.RLock()
+            list := make([]Note, 0, len(notes))
+            for _, n := range notes {
+                // copy value to avoid races if mutated later
+                list = append(list, *n)
+            }
+            notesMu.RUnlock()
+            // sort newest first
+            if len(list) > 1 {
+                sort.Slice(list, func(i, j int) bool {
+                    if list[i].UpdatedAt.Equal(list[j].UpdatedAt) {
+                        return list[i].CreatedAt.After(list[j].CreatedAt)
+                    }
+                    return list[i].UpdatedAt.After(list[j].UpdatedAt)
+                })
+            }
+            w.Header().Set("Content-Type", "application/json")
+            _ = json.NewEncoder(w).Encode(list)
             return
         default:
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
