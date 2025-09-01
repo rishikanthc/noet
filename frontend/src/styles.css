@@ -17,6 +17,23 @@ body {
 }
 
 .app-container { padding: 32px 24px; }
+/* Home page layout */
+.home-container {
+  position: relative;
+  min-height: 100vh;
+  background: #ffffff;
+}
+.new-post-link {
+  position: absolute;
+  top: 16px;
+  right: 20px;
+  background: transparent;
+  border: none;
+  color: #111111;
+  font-weight: 600;
+  cursor: pointer;
+}
+.new-post-link:disabled { opacity: 0.6; cursor: default; }
 header h1 {
   margin: 0 0 12px;
   font-family: 'Space Grotesk', sans-serif;

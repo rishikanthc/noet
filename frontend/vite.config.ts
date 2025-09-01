@@ -5,6 +5,7 @@ import { resolve } from 'node:path'
 // Build to the Go backend static dir and allow importing from ../../quill
 export default defineConfig({
   plugins: [react()],
+  cacheDir: resolve(__dirname, '.vite'),
   resolve: {
     alias: {
       '@quill': resolve(__dirname, '../../quill/src'),
@@ -20,4 +21,3 @@ export default defineConfig({
     }
   }
 })
-

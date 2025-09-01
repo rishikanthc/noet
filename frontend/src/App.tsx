@@ -1,22 +1,65 @@
-import { useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Editor, { type EditorRef } from '@quill/Editor'
 import './styles.css'
 
-export default function App() {
-  const [content, setContent] = useState('<h1>Welcome to Quill Editor</h1><p>This is a demo of the extensible Tiptap-based editor library. Try editing this content!</p><h2>Formatting Features</h2><ul><li><strong>Bold text</strong> works perfectly</li><li><em>Italic text</em> is now enabled</li><li><mark>Highlighting</mark> is available too</li><li>Beautiful typography with Noto Sans and Space Grotesk fonts</li></ul><h3>Try These Shortcuts:</h3><ul><li><strong>Ctrl+B / Cmd+B</strong> for bold</li><li><strong>Ctrl+I / Cmd+I</strong> for italic</li><li><strong>Ctrl+Shift+H / Cmd+Shift+H</strong> for highlight</li><li>Type <code>==text==</code> for highlighting</li><li>Type <code>*text*</code> or <code>_text_</code> for italic</li></ul>')
+function Home() {
+  const [creating, setCreating] = useState(false)
+
+  const handleNewPost = async () => {
+    if (creating) return
+    setCreating(true)
+    try {
+      const res = await fetch('/api/notes', { method: 'POST' })
+      if (!res.ok) throw new Error(`Failed to create note: ${res.status}`)
+      const note = await res.json()
+      window.location.assign(`/posts/${note.id}`)
+    } catch (e) {
+      console.error(e)
+      alert('Failed to create a new post')
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  return (
+    <div className="home-container">
+      <button className="new-post-link" onClick={handleNewPost} disabled={creating}>
+        New Post
+      </button>
+    </div>
+  )
+}
+
+function PostEditor({ id }: { id: string }) {
+  const [content, setContent] = useState<string>('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string|undefined>()
   const editorRef = useRef<EditorRef>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/notes/${id}`)
+        if (!res.ok) throw new Error(`Failed to load note: ${res.status}`)
+        const note = await res.json()
+        if (!cancelled) setContent(note.content || '')
+      } catch (e: any) {
+        console.error(e)
+        if (!cancelled) setError(e?.message || 'Failed to load note')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [id])
+
+  if (loading) return <div className="app-container"><p>Loading…</p></div>
+  if (error) return <div className="app-container"><p>{error}</p></div>
 
   return (
     <div className="app-container">
-      <header>
-        <h1>Quill Editor Demo</h1>
-        <div className="demo-controls">
-          <button onClick={() => editorRef.current?.focus()}>Focus Editor</button>
-          <button onClick={() => setContent('')}>Clear</button>
-          <button onClick={() => editorRef.current?.setContent('<p>Preset content</p>')}>Set Preset</button>
-          <button onClick={() => alert(editorRef.current?.getContent() || '')}>Get HTML</button>
-        </div>
-      </header>
       <main>
         <Editor
           ref={editorRef}
@@ -27,4 +70,17 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+export default function App() {
+  const path = typeof window !== 'undefined' ? window.location.pathname : '/'
+  const match = useMemo(() => {
+    const m = path.match(/^\/posts\/([A-Za-z0-9_-]+)$/)
+    return m?.[1]
+  }, [path])
+
+  if (match) {
+    return <PostEditor id={match} />
+  }
+  return <Home />
 }
