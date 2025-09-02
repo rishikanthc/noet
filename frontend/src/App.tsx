@@ -669,16 +669,8 @@ function PostEditor({ id }: { id: string }) {
 
   return (
     <div className="app-container editor-page">
-      <Header 
-        siteTitle={siteTitle}
-        isAuthenticated={isAuthenticated}
-        onLogout={logout}
-        onNewPost={handleNewPost}
-        onSettings={() => window.location.assign('/settings')}
-        creating={false}
-        showBack={true}
-        onBack={() => window.location.assign('/')}
-      />
+      {/* Minimal site title link in top-left for posts page */}
+      <a href="/" className="post-site-title-link site-title">{siteTitle || 'Untitled Site'}</a>
       {dirty && <div className="unsaved-indicator" aria-label="Unsaved changes" />}
       <main>
         <div className="editor-wrap">

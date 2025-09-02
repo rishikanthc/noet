@@ -568,6 +568,26 @@ header h1 {
   line-height: 1.7;
 }
 
+/* Posts page minimal title link in top-left */
+.post-site-title-link {
+  position: fixed;
+  top: 16px;
+  left: 24px;
+  text-decoration: none;
+  color: #111111;
+  z-index: 1000;
+}
+
+/* Posts page: slightly larger wordmark for clarity */
+.editor-page .post-site-title-link.site-title {
+  font-size: 32px;
+}
+
+/* Add top padding so content doesn't sit under the title link */
+.editor-page .editor-wrap {
+  padding-top: 32px;
+}
+
 /* Introduction text: use Plus Jakarta Sans at a subtle 420 weight */
 .intro-block {
   font-weight: 450;
