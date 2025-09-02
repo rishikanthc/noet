@@ -185,36 +185,38 @@ function PostEditor({ id }: { id: string }) {
   if (error) return <div className="app-container"><p>{error}</p></div>
 
   return (
-    <div className="app-container">
+    <div className="app-container editor-page">
       {dirty && <div className="unsaved-indicator" aria-label="Unsaved changes" />}
       <main>
-        <Editor
-          ref={editorRef}
-          content={content}
-          onChange={(html) => {
-            setContent(html)
-            latestContentRef.current = html
-            setDirty(true)
-          }}
-          onAutoSave={async (html) => {
-            try {
-              const res = await fetch(`/api/posts/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: html })
-              })
-              if (!res.ok) throw new Error(`Failed to save note: ${res.status}`)
-              // Only clear dirty if content hasn't changed since this save started
-              if (latestContentRef.current === html) {
-                setDirty(false)
+        <div className="editor-wrap">
+          <button className="back-link" onClick={() => window.location.assign('/')}>Back</button>
+          <Editor
+            ref={editorRef}
+            content={content}
+            onChange={(html) => {
+              setContent(html)
+              latestContentRef.current = html
+              setDirty(true)
+            }}
+            onAutoSave={async (html) => {
+              try {
+                const res = await fetch(`/api/posts/${id}`, {
+                  method: 'PUT',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ content: html })
+                })
+                if (!res.ok) throw new Error(`Failed to save note: ${res.status}`)
+                // Only clear dirty if content hasn't changed since this save started
+                if (latestContentRef.current === html) {
+                  setDirty(false)
+                }
+              } catch (e) {
+                console.error(e)
+                // keep dirty = true so the dot stays visible
               }
-            } catch (e) {
-              console.error(e)
-              // keep dirty = true so the dot stays visible
-            }
-          }}
-          style={{ maxWidth: 900, margin: '0 auto' }}
-        />
+            }}
+          />
+        </div>
       </main>
     </div>
   )
@@ -238,7 +240,7 @@ function Settings() {
   }
 
   return (
-    <div className="app-container">
+    <div className="app-container settings-page">
       <main style={{ maxWidth: 800, margin: '0 auto' }}>
         <h1 style={{ fontWeight: 400, fontFamily: 'Inter, sans-serif' }}>Settings</h1>
         <label style={{ display: 'block', margin: '12px 0 6px', color: '#444' }}>Introduction text</label>
