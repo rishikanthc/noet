@@ -268,13 +268,15 @@ function Login() {
   )
 }
 
-function Header({ siteTitle, isAuthenticated, onLogout, onNewPost, onSettings, creating }: {
+function Header({ siteTitle, isAuthenticated, onLogout, onNewPost, onSettings, creating, showBack, onBack }: {
   siteTitle: string
   isAuthenticated: boolean
   onLogout: () => void
   onNewPost: () => void
   onSettings: () => void
   creating: boolean
+  showBack?: boolean
+  onBack?: () => void
 }) {
   return (
     <header className="site-header">
@@ -282,19 +284,26 @@ function Header({ siteTitle, isAuthenticated, onLogout, onNewPost, onSettings, c
         <h1 className={`site-title ${!siteTitle ? 'empty' : ''}`}>
           {siteTitle || 'Untitled Site'}
         </h1>
-        {isAuthenticated && (
-          <div className="header-actions">
-            <button className="header-button" onClick={onSettings}>
-              Settings
+        <div className="header-actions">
+          {showBack && onBack && (
+            <button className="header-button" onClick={onBack}>
+              ← Back
             </button>
-            <button className="header-button" onClick={onNewPost} disabled={creating}>
-              {creating ? 'Creating...' : 'New Post'}
-            </button>
-            <button className="header-button" onClick={onLogout}>
-              Logout
-            </button>
-          </div>
-        )}
+          )}
+          {isAuthenticated && (
+            <>
+              <button className="header-button" onClick={onSettings}>
+                Settings
+              </button>
+              <button className="header-button" onClick={onNewPost} disabled={creating}>
+                {creating ? 'Creating...' : 'New Post'}
+              </button>
+              <button className="header-button" onClick={onLogout}>
+                Logout
+              </button>
+            </>
+          )}
+        </div>
       </div>
     </header>
   )
@@ -539,7 +548,7 @@ function Home() {
         {intro && intro.trim() && (
           <div className="intro-block">{intro}</div>
         )}
-        <h1>All Posts</h1>
+        <h1>posts</h1>
         {loading && <p>Loading…</p>}
         {error && <p>{error}</p>}
         {!loading && !error && (
@@ -667,11 +676,12 @@ function PostEditor({ id }: { id: string }) {
         onNewPost={handleNewPost}
         onSettings={() => window.location.assign('/settings')}
         creating={false}
+        showBack={true}
+        onBack={() => window.location.assign('/')}
       />
       {dirty && <div className="unsaved-indicator" aria-label="Unsaved changes" />}
       <main>
         <div className="editor-wrap">
-          <button className="back-link" onClick={() => window.location.assign('/')}>Back</button>
           <Editor
             ref={editorRef}
             content={content}

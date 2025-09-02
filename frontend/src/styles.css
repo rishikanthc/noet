@@ -1,9 +1,11 @@
 @import '@quill/editor-styles.css';
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,500;0,600;0,700;1,400&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
+/* Use variable Plus Jakarta Sans so we can set 420 weight */
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,200..800;1,200..800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@100;200;300;400;500;600;700;800;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@200;300;400;500;600;700;800&display=swap');
 
 :root {
   --bg: #ffffff;
@@ -29,12 +31,24 @@ body {
   position: relative;
   min-height: 100vh;
   background: #ffffff;
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
+  /* Home page body typography */
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
   font-weight: 400;
 }
-.home-content { padding: 56px 24px 24px; max-width: 800px; margin: 0 auto; font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; line-height: 1.7; }
-.home-content h1 { margin: 0 0 12px; font-family: 'Plus Jakarta Sans', sans-serif; font-weight: 600; letter-spacing: -0.01em; }
-.intro-block { margin: 0 0 12px; color: #333; white-space: pre-wrap; }
+.home-content { 
+  padding: 56px 24px 24px; 
+  max-width: 800px; 
+  margin: 0 auto; 
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; 
+  line-height: 1.7; 
+}
+.home-content h1 { 
+  margin: 0 0 12px; 
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; 
+  font-weight: 600; 
+  letter-spacing: -0.01em; 
+}
+.intro-block { margin: 0 0 24px; color: #333; white-space: pre-wrap; }
 .post-list { list-style: none; padding: 0; margin: 12px 0 0; }
 .post-list li { margin: 0; }
 .post-link {
@@ -404,8 +418,7 @@ header h1 {
 /* Site Header */
 .site-header {
   width: 100%;
-  padding: 24px 0;
-  border-bottom: 1px solid #f0f0f0;
+  padding: 32px 0;
   background: #ffffff;
 }
 
@@ -419,19 +432,20 @@ header h1 {
 }
 
 .site-title {
-  font-family: 'Playfair Display', serif;
-  font-size: 28px;
-  font-weight: 600;
+  /* Sleek, not-too-thick display */
+  font-family: 'Outfit', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-size: 40px;
+  font-weight: 300; /* Outfit Light */
   color: #111111;
   margin: 0;
   letter-spacing: -0.02em;
-  line-height: 1.2;
+  line-height: 1.08;
 }
 
 .site-title.empty {
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  font-size: 18px;
-  font-weight: 500;
+  font-family: 'Outfit', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-size: 26px;
+  font-weight: 300; /* Outfit Light */
   color: #666666;
   font-style: italic;
 }
@@ -447,7 +461,7 @@ header h1 {
   position: relative;
   min-height: 100vh;
   background: #ffffff;
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   font-weight: 400;
   padding-top: 0;
 }
@@ -458,6 +472,13 @@ header h1 {
   margin: 0 auto;
   font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   line-height: 1.7;
+}
+
+/* Introduction text: use Plus Jakarta Sans at a subtle 420 weight */
+.intro-block {
+  font-weight: 450;
+  /* Ensure variable axis usage for browsers that respect it */
+  font-variation-settings: 'wght' 450;
 }
 
 /* Move buttons to header actions */
