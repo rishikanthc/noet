@@ -609,6 +609,31 @@ function PostEditor({ id }: { id: string }) {
   const editorRef = useRef<EditorRef>(null)
   const latestContentRef = useRef<string>('')
 
+  const handleImageUpload = async (file: File): Promise<string> => {
+    if (!token) {
+      throw new Error('Not authenticated')
+    }
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const response = await fetch('/api/uploads', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      body: formData
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Upload failed: ${errorText}`)
+    }
+
+    const data = await response.json()
+    return data.url
+  }
+
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -683,6 +708,7 @@ function PostEditor({ id }: { id: string }) {
               latestContentRef.current = html
               setDirty(true)
             } : undefined}
+            onImageUpload={isAuthenticated ? handleImageUpload : undefined}
             onAutoSave={isAuthenticated ? async (html) => {
               try {
                 const res = await fetch(`/api/posts/${id}`, {

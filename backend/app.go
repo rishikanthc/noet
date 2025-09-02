@@ -7,8 +7,10 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "io"
     "mime"
     "net/http"
+    "os"
     "path"
     "path/filepath"
     "strings"
@@ -18,6 +20,7 @@ import (
     _ "modernc.org/sqlite"
     "golang.org/x/crypto/bcrypt"
     "github.com/golang-jwt/jwt/v5"
+    "github.com/google/uuid"
 )
 
 //go:embed static/*
@@ -47,6 +50,15 @@ type User struct {
     Username     string    `json:"username"`
     PasswordHash string    `json:"-"`
     CreatedAt    time.Time `json:"createdAt"`
+}
+
+type Attachment struct {
+    ID        int64     `json:"id"`
+    Filename  string    `json:"filename"`
+    OriginalName string `json:"originalName"`
+    MimeType  string    `json:"mimeType"`
+    Size      int64     `json:"size"`
+    CreatedAt time.Time `json:"createdAt"`
 }
 
 type Claims struct {
@@ -105,6 +117,15 @@ CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   username TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
+  created_at DATETIME NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS attachments (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  filename TEXT UNIQUE NOT NULL,
+  original_name TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  size INTEGER NOT NULL,
   created_at DATETIME NOT NULL
 );
 `)
@@ -259,6 +280,97 @@ func extractTitleFromHTML(htmlStr string) string {
     title := strings.TrimSpace(b.String())
     title = strings.Join(strings.Fields(title), " ")
     return title
+}
+
+func (a *App) ensureUploadsDir() error {
+    uploadsDir := "uploads"
+    if _, err := os.Stat(uploadsDir); os.IsNotExist(err) {
+        return os.MkdirAll(uploadsDir, 0755)
+    }
+    return nil
+}
+
+func (a *App) saveAttachment(file io.Reader, originalFilename, mimeType string, size int64) (*Attachment, error) {
+    // Generate unique filename
+    ext := filepath.Ext(originalFilename)
+    filename := uuid.New().String() + ext
+    
+    // Ensure uploads directory exists
+    if err := a.ensureUploadsDir(); err != nil {
+        return nil, fmt.Errorf("failed to create uploads directory: %v", err)
+    }
+    
+    // Save file to disk
+    filepath := filepath.Join("uploads", filename)
+    outFile, err := os.Create(filepath)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create file: %v", err)
+    }
+    defer outFile.Close()
+    
+    _, err = io.Copy(outFile, file)
+    if err != nil {
+        os.Remove(filepath) // Clean up on error
+        return nil, fmt.Errorf("failed to save file: %v", err)
+    }
+    
+    // Save metadata to database
+    now := time.Now()
+    result, err := a.DB.Exec(`
+        INSERT INTO attachments (filename, original_name, mime_type, size, created_at) 
+        VALUES (?, ?, ?, ?, ?)
+    `, filename, originalFilename, mimeType, size, now)
+    if err != nil {
+        os.Remove(filepath) // Clean up on error
+        return nil, fmt.Errorf("failed to save metadata: %v", err)
+    }
+    
+    id, err := result.LastInsertId()
+    if err != nil {
+        return nil, err
+    }
+    
+    return &Attachment{
+        ID:           id,
+        Filename:     filename,
+        OriginalName: originalFilename,
+        MimeType:     mimeType,
+        Size:         size,
+        CreatedAt:    now,
+    }, nil
+}
+
+func (a *App) getAttachment(filename string) (*Attachment, error) {
+    var attachment Attachment
+    row := a.DB.QueryRow(`
+        SELECT id, filename, original_name, mime_type, size, created_at 
+        FROM attachments WHERE filename = ?
+    `, filename)
+    
+    err := row.Scan(&attachment.ID, &attachment.Filename, &attachment.OriginalName, 
+                   &attachment.MimeType, &attachment.Size, &attachment.CreatedAt)
+    if err != nil {
+        return nil, err
+    }
+    
+    return &attachment, nil
+}
+
+func isValidImageMimeType(mimeType string) bool {
+    validTypes := []string{
+        "image/jpeg",
+        "image/jpg", 
+        "image/png",
+        "image/gif",
+        "image/webp",
+    }
+    
+    for _, validType := range validTypes {
+        if mimeType == validType {
+            return true
+        }
+    }
+    return false
 }
 
 func (a *App) routes() {
@@ -608,6 +720,100 @@ func (a *App) routes() {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
         }
+    })
+
+    // Image upload endpoint
+    mux.HandleFunc("/api/uploads", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        
+        // Protect upload endpoint
+        a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+            // Parse multipart form
+            err := r.ParseMultipartForm(10 << 20) // 10MB max
+            if err != nil {
+                http.Error(w, "failed to parse form", http.StatusBadRequest)
+                return
+            }
+            
+            file, handler, err := r.FormFile("file")
+            if err != nil {
+                http.Error(w, "no file provided", http.StatusBadRequest)
+                return
+            }
+            defer file.Close()
+            
+            // Validate mime type
+            contentType := handler.Header.Get("Content-Type")
+            if contentType == "" {
+                contentType = mime.TypeByExtension(filepath.Ext(handler.Filename))
+            }
+            
+            if !isValidImageMimeType(contentType) {
+                http.Error(w, "invalid file type - only images are allowed", http.StatusBadRequest)
+                return
+            }
+            
+            // Save attachment
+            attachment, err := a.saveAttachment(file, handler.Filename, contentType, handler.Size)
+            if err != nil {
+                http.Error(w, fmt.Sprintf("failed to save file: %v", err), http.StatusInternalServerError)
+                return
+            }
+            
+            // Return attachment info with URL
+            response := map[string]interface{}{
+                "id":           attachment.ID,
+                "filename":     attachment.Filename,
+                "originalName": attachment.OriginalName,
+                "mimeType":     attachment.MimeType,
+                "size":         attachment.Size,
+                "url":          fmt.Sprintf("/api/uploads/%s", attachment.Filename),
+                "createdAt":    attachment.CreatedAt,
+            }
+            
+            w.Header().Set("Content-Type", "application/json")
+            w.WriteHeader(http.StatusCreated)
+            _ = json.NewEncoder(w).Encode(response)
+        })(w, r)
+    })
+
+    // Serve uploaded files
+    mux.HandleFunc("/api/uploads/", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        
+        filename := strings.TrimPrefix(r.URL.Path, "/api/uploads/")
+        if filename == "" {
+            http.NotFound(w, r)
+            return
+        }
+        
+        // Get attachment metadata
+        attachment, err := a.getAttachment(filename)
+        if err != nil {
+            if errors.Is(err, sql.ErrNoRows) {
+                http.NotFound(w, r)
+            } else {
+                http.Error(w, "database error", http.StatusInternalServerError)
+            }
+            return
+        }
+        
+        // Serve file
+        filepath := filepath.Join("uploads", filename)
+        if _, err := os.Stat(filepath); os.IsNotExist(err) {
+            http.NotFound(w, r)
+            return
+        }
+        
+        w.Header().Set("Content-Type", attachment.MimeType)
+        w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", attachment.OriginalName))
+        http.ServeFile(w, r, filepath)
     })
 
     // SSE stream
