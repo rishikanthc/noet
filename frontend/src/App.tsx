@@ -268,6 +268,38 @@ function Login() {
   )
 }
 
+function Header({ siteTitle, isAuthenticated, onLogout, onNewPost, onSettings, creating }: {
+  siteTitle: string
+  isAuthenticated: boolean
+  onLogout: () => void
+  onNewPost: () => void
+  onSettings: () => void
+  creating: boolean
+}) {
+  return (
+    <header className="site-header">
+      <div className="site-header-content">
+        <h1 className={`site-title ${!siteTitle ? 'empty' : ''}`}>
+          {siteTitle || 'Untitled Site'}
+        </h1>
+        {isAuthenticated && (
+          <div className="header-actions">
+            <button className="header-button" onClick={onSettings}>
+              Settings
+            </button>
+            <button className="header-button" onClick={onNewPost} disabled={creating}>
+              {creating ? 'Creating...' : 'New Post'}
+            </button>
+            <button className="header-button" onClick={onLogout}>
+              Logout
+            </button>
+          </div>
+        )}
+      </div>
+    </header>
+  )
+}
+
 function ContextMenu({ x, y, onDelete, onClose }: { x: number; y: number; onDelete: () => void; onClose: () => void }) {
   useEffect(() => {
     const handleClickOutside = () => onClose()
@@ -334,6 +366,7 @@ function Home() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | undefined>()
   const [intro, setIntro] = useState<string>('')
+  const [siteTitle, setSiteTitle] = useState<string>('')
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; postId: number } | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<{ postId: number; title: string } | null>(null)
 
@@ -424,19 +457,20 @@ function Home() {
   }, [])
 
   useEffect(() => {
-    // Load intro text from API
-    const loadIntro = async () => {
+    // Load settings from API
+    const loadSettings = async () => {
       try {
-        const res = await fetch('/api/settings?key=introText')
+        const res = await fetch('/api/settings')
         if (res.ok) {
           const data = await res.json()
-          setIntro(data.value || '')
+          setIntro(data.introText || '')
+          setSiteTitle(data.siteTitle || '')
         }
       } catch (e) {
-        console.error('Failed to load intro text:', e)
+        console.error('Failed to load settings:', e)
       }
     }
-    loadIntro()
+    loadSettings()
   }, [])
 
   const handleNewPost = async () => {
@@ -493,19 +527,14 @@ function Home() {
 
   return (
     <div className="home-container">
-      {isAuthenticated && (
-        <>
-          <button className="settings-link" onClick={() => window.location.assign('/settings')}>
-            Settings
-          </button>
-          <button className="new-post-link" onClick={handleNewPost} disabled={creating}>
-            New Post
-          </button>
-          <button className="logout-button" onClick={logout}>
-            Logout
-          </button>
-        </>
-      )}
+      <Header 
+        siteTitle={siteTitle}
+        isAuthenticated={isAuthenticated}
+        onLogout={logout}
+        onNewPost={handleNewPost}
+        onSettings={() => window.location.assign('/settings')}
+        creating={creating}
+      />
       <div className="home-content">
         {intro && intro.trim() && (
           <div className="intro-block">{intro}</div>
@@ -562,11 +591,12 @@ function Home() {
 }
 
 function PostEditor({ id }: { id: string }) {
-  const { isAuthenticated, token } = useAuth()
+  const { isAuthenticated, token, logout } = useAuth()
   const [content, setContent] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string|undefined>()
   const [dirty, setDirty] = useState(false)
+  const [siteTitle, setSiteTitle] = useState<string>('')
   const editorRef = useRef<EditorRef>(null)
   const latestContentRef = useRef<string>('')
 
@@ -593,11 +623,51 @@ function PostEditor({ id }: { id: string }) {
     return () => { cancelled = true }
   }, [id])
 
+  useEffect(() => {
+    // Load site title
+    const loadSettings = async () => {
+      try {
+        const res = await fetch('/api/settings')
+        if (res.ok) {
+          const data = await res.json()
+          setSiteTitle(data.siteTitle || '')
+        }
+      } catch (e) {
+        console.error('Failed to load settings:', e)
+      }
+    }
+    loadSettings()
+  }, [])
+
+  const handleNewPost = async () => {
+    if (!isAuthenticated) return
+    try {
+      const res = await fetch('/api/posts', { 
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      })
+      if (!res.ok) throw new Error(`Failed to create note: ${res.status}`)
+      const note = await res.json()
+      window.location.assign(`/posts/${note.id}`)
+    } catch (e) {
+      console.error(e)
+      alert('Failed to create a new post')
+    }
+  }
+
   if (loading) return <div className="app-container"><p>Loading…</p></div>
   if (error) return <div className="app-container"><p>{error}</p></div>
 
   return (
     <div className="app-container editor-page">
+      <Header 
+        siteTitle={siteTitle}
+        isAuthenticated={isAuthenticated}
+        onLogout={logout}
+        onNewPost={handleNewPost}
+        onSettings={() => window.location.assign('/settings')}
+        creating={false}
+      />
       {dirty && <div className="unsaved-indicator" aria-label="Unsaved changes" />}
       <main>
         <div className="editor-wrap">
@@ -639,18 +709,21 @@ function PostEditor({ id }: { id: string }) {
 }
 
 function Settings() {
-  const { isAuthenticated, token } = useAuth()
-  const [text, setText] = useState<string>('')
+  const { isAuthenticated, token, logout } = useAuth()
+  const [introText, setIntroText] = useState<string>('')
+  const [siteTitle, setSiteTitle] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
     const loadSettings = async () => {
       try {
-        const res = await fetch('/api/settings?key=introText')
+        // Load all settings
+        const res = await fetch('/api/settings')
         if (res.ok) {
           const data = await res.json()
-          setText(data.value || '')
+          setIntroText(data.introText || '')
+          setSiteTitle(data.siteTitle || '')
         }
       } catch (e) {
         console.error('Failed to load settings:', e)
@@ -664,29 +737,93 @@ function Settings() {
   const handleSave = async () => {
     if (!isAuthenticated || !token) return
     setSaving(true)
+    
     try {
-      const res = await fetch('/api/settings', {
+      console.log('Saving settings...', { introText, siteTitle })
+      
+      // Save introduction text
+      console.log('Saving intro text...')
+      const introRes = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify({ key: 'introText', value: text })
+        body: JSON.stringify({ key: 'introText', value: introText })
       })
-      if (!res.ok) throw new Error('Failed to save settings')
+      
+      if (!introRes.ok) {
+        const errorText = await introRes.text()
+        console.error('Failed to save intro text:', introRes.status, errorText)
+        throw new Error(`Failed to save introduction text: ${introRes.status} - ${errorText}`)
+      }
+      
+      const introResult = await introRes.json()
+      console.log('Intro text saved successfully:', introResult)
+      
+      // Save site title
+      console.log('Saving site title...')
+      const titleRes = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ key: 'siteTitle', value: siteTitle })
+      })
+      
+      if (!titleRes.ok) {
+        const errorText = await titleRes.text()
+        console.error('Failed to save site title:', titleRes.status, errorText)
+        throw new Error(`Failed to save site title: ${titleRes.status} - ${errorText}`)
+      }
+      
+      const titleResult = await titleRes.json()
+      console.log('Site title saved successfully:', titleResult)
+      
+      console.log('All settings saved successfully, redirecting...')
       window.location.assign('/')
     } catch (e) {
-      console.error('Failed to save settings:', e)
-      alert('Failed to save settings')
+      console.error('Save settings error:', e)
+      // Show a more user-friendly message since the data is actually being saved
+      if (e.message && (e.message.includes('Failed to save') || e.message.includes('fetch'))) {
+        alert('Settings may have been saved with warnings. Please refresh the page to verify.')
+      } else {
+        alert(`Failed to save settings: ${e.message}`)
+      }
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleNewPost = async () => {
+    if (!isAuthenticated) return
+    try {
+      const res = await fetch('/api/posts', { 
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      })
+      if (!res.ok) throw new Error(`Failed to create note: ${res.status}`)
+      const note = await res.json()
+      window.location.assign(`/posts/${note.id}`)
+    } catch (e) {
+      console.error(e)
+      alert('Failed to create a new post')
     }
   }
 
   if (!isAuthenticated) {
     return (
       <div className="app-container settings-page">
-        <main style={{ maxWidth: 800, margin: '0 auto' }}>
+        <Header 
+          siteTitle={siteTitle}
+          isAuthenticated={false}
+          onLogout={logout}
+          onNewPost={handleNewPost}
+          onSettings={() => {}}
+          creating={false}
+        />
+        <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
           <p>Access denied. Please log in to access settings.</p>
           <button onClick={() => window.location.assign('/admin')}>Go to Login</button>
         </main>
@@ -697,7 +834,15 @@ function Settings() {
   if (loading) {
     return (
       <div className="app-container settings-page">
-        <main style={{ maxWidth: 800, margin: '0 auto' }}>
+        <Header 
+          siteTitle={siteTitle}
+          isAuthenticated={isAuthenticated}
+          onLogout={logout}
+          onNewPost={handleNewPost}
+          onSettings={() => {}}
+          creating={false}
+        />
+        <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
           <p>Loading settings...</p>
         </main>
       </div>
@@ -706,18 +851,58 @@ function Settings() {
 
   return (
     <div className="app-container settings-page">
-      <main style={{ maxWidth: 800, margin: '0 auto' }}>
+      <Header 
+        siteTitle={siteTitle}
+        isAuthenticated={isAuthenticated}
+        onLogout={logout}
+        onNewPost={handleNewPost}
+        onSettings={() => {}}
+        creating={false}
+      />
+      <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
         <h1 style={{ fontWeight: 400, fontFamily: 'Inter, sans-serif' }}>Settings</h1>
-        <label style={{ display: 'block', margin: '12px 0 6px', color: '#444' }}>Introduction text</label>
-        <textarea
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={6}
-          style={{ width: '100%', fontFamily: 'Inter, system-ui, sans-serif', fontSize: 14, padding: 10, boxSizing: 'border-box' }}
-          placeholder="Write a short introduction to show on the homepage"
-          disabled={saving}
-        />
-        <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
+        
+        <div style={{ marginBottom: '24px' }}>
+          <label style={{ display: 'block', margin: '12px 0 6px', color: '#444' }}>Site title</label>
+          <input
+            type="text"
+            value={siteTitle}
+            onChange={(e) => setSiteTitle(e.target.value)}
+            style={{ 
+              width: '100%', 
+              fontFamily: 'Inter, system-ui, sans-serif', 
+              fontSize: 14, 
+              padding: 10, 
+              boxSizing: 'border-box',
+              border: '1px solid #d1d5db',
+              borderRadius: 6
+            }}
+            placeholder="Enter your site title"
+            disabled={saving}
+          />
+        </div>
+
+        <div>
+          <label style={{ display: 'block', margin: '12px 0 6px', color: '#444' }}>Introduction text</label>
+          <textarea
+            value={introText}
+            onChange={(e) => setIntroText(e.target.value)}
+            rows={6}
+            style={{ 
+              width: '100%', 
+              fontFamily: 'Inter, system-ui, sans-serif', 
+              fontSize: 14, 
+              padding: 10, 
+              boxSizing: 'border-box',
+              border: '1px solid #d1d5db',
+              borderRadius: 6
+            }}
+            placeholder="Write a short introduction to show on the homepage"
+            disabled={saving}
+          />
+        </div>
+        
+        <div style={{ marginTop: 20, display: 'flex', gap: 8 }}>
           <button 
             onClick={handleSave} 
             disabled={saving}
