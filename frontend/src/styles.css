@@ -180,3 +180,108 @@ header h1 {
   margin: 0 0 16px 0;
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
 }
+
+/* Context Menu */
+.context-menu {
+  position: fixed;
+  z-index: 1000;
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  padding: 4px 0;
+  min-width: 120px;
+}
+
+.context-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  text-align: left;
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-size: 14px;
+  color: #111111;
+  cursor: pointer;
+  transition: background-color 0.1s ease;
+}
+
+.context-menu-item:hover {
+  background: #f5f5f5;
+}
+
+.context-menu-item.delete-item:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+/* Confirmation Dialog */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1001;
+}
+
+.dialog-content {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 400px;
+  width: 90%;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.dialog-message {
+  margin: 0 0 20px;
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-size: 16px;
+  color: #111111;
+  line-height: 1.5;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
+.dialog-button {
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.confirm-button {
+  background: #111111;
+  color: #ffffff;
+  border: none;
+}
+
+.confirm-button:hover {
+  background: #333333;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.cancel-button {
+  background: #f5f5f5;
+  color: #111111;
+  border: none;
+}
+
+.cancel-button:hover {
+  background: #e5e5e5;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}

@@ -1,3 +1,5 @@
 backend/.gocache
 backend/noet
 quill-ref/
+backend/noet.db-wal
+backend/noet.db-shm

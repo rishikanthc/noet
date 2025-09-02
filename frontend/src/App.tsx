@@ -4,12 +4,73 @@ import './styles.css'
 
 type Note = { id: number; title?: string; content?: string; createdAt?: string; updatedAt?: string }
 
+function ContextMenu({ x, y, onDelete, onClose }: { x: number; y: number; onDelete: () => void; onClose: () => void }) {
+  useEffect(() => {
+    const handleClickOutside = () => onClose()
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    }
+    document.addEventListener('click', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('click', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [onClose])
+
+  return (
+    <div 
+      className="context-menu"
+      style={{ left: x, top: y }}
+      onMouseDown={(e) => e.stopPropagation()}
+    >
+      <button 
+        className="context-menu-item delete-item"
+        onClick={(e) => {
+          e.stopPropagation()
+          onDelete()
+        }}
+      >
+        Delete
+      </button>
+    </div>
+  )
+}
+
+function ConfirmDialog({ message, onConfirm, onCancel }: { message: string; onConfirm: () => void; onCancel: () => void }) {
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onCancel()
+    }
+    document.addEventListener('keydown', handleEscape)
+    return () => document.removeEventListener('keydown', handleEscape)
+  }, [onCancel])
+
+  return (
+    <div className="dialog-overlay">
+      <div className="dialog-content">
+        <p className="dialog-message">{message}</p>
+        <div className="dialog-actions">
+          <button className="dialog-button confirm-button" onClick={onConfirm}>
+            Delete
+          </button>
+          <button className="dialog-button cancel-button" onClick={onCancel}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function Home() {
   const [creating, setCreating] = useState(false)
   const [posts, setPosts] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | undefined>()
   const [intro, setIntro] = useState<string>('')
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; postId: number } | null>(null)
+  const [confirmDialog, setConfirmDialog] = useState<{ postId: number; title: string } | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -75,6 +136,15 @@ function Home() {
           console.error('update parse error', e)
         }
       })
+      es.addEventListener('post-deleted', (ev: MessageEvent) => {
+        if (cancelled) return
+        try {
+          const { id } = JSON.parse(ev.data)
+          setPosts(prev => prev.filter(p => p.id !== id))
+        } catch (e) {
+          console.error('delete parse error', e)
+        }
+      })
       es.onerror = (e) => {
         console.warn('SSE error', e)
       }
@@ -112,6 +182,34 @@ function Home() {
     }
   }
 
+  const handleDeletePost = async (postId: number) => {
+    try {
+      const res = await fetch(`/api/posts/${postId}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error(`Failed to delete post: ${res.status}`)
+      // Remove post from local state immediately for responsive UI
+      setPosts(prev => prev.filter(p => p.id !== postId))
+    } catch (e) {
+      console.error(e)
+      alert('Failed to delete post')
+    }
+  }
+
+  const handleRightClick = (e: React.MouseEvent, postId: number) => {
+    e.preventDefault()
+    setContextMenu({ x: e.clientX, y: e.clientY, postId })
+  }
+
+  const handleDeleteClick = (postId: number, postTitle: string) => {
+    setContextMenu(null)
+    setConfirmDialog({ postId, title: postTitle })
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!confirmDialog) return
+    await handleDeletePost(confirmDialog.postId)
+    setConfirmDialog(null)
+  }
+
   return (
     <div className="home-container">
       <button className="settings-link" onClick={() => window.location.assign('/settings')}>
@@ -134,7 +232,11 @@ function Home() {
             <ul className="post-list">
               {posts.map(p => (
                 <li key={p.id}>
-                  <a href={`/posts/${p.id}`} className="post-link">
+                  <a 
+                    href={`/posts/${p.id}`} 
+                    className="post-link"
+                    onContextMenu={(e) => handleRightClick(e, p.id)}
+                  >
                     <span className="post-title">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
                     {p.updatedAt && (
                       <span className="post-meta">{new Date(p.updatedAt).toLocaleString()}</span>
@@ -146,6 +248,27 @@ function Home() {
           )
         )}
       </div>
+      
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onDelete={() => {
+            const post = posts.find(p => p.id === contextMenu.postId)
+            const title = post?.title && post.title.trim() ? post.title : 'Untitled'
+            handleDeleteClick(contextMenu.postId, title)
+          }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
+      
+      {confirmDialog && (
+        <ConfirmDialog
+          message={`Are you sure you want to delete "${confirmDialog.title}"?`}
+          onConfirm={handleConfirmDelete}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      )}
     </div>
   )
 }
