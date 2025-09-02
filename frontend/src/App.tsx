@@ -159,11 +159,19 @@ function Home() {
   }, [])
 
   useEffect(() => {
-    // Load intro text from localStorage
-    try {
-      const v = localStorage.getItem('noet.introText') || ''
-      setIntro(v)
-    } catch {}
+    // Load intro text from API
+    const loadIntro = async () => {
+      try {
+        const res = await fetch('/api/settings?key=introText')
+        if (res.ok) {
+          const data = await res.json()
+          setIntro(data.value || '')
+        }
+      } catch (e) {
+        console.error('Failed to load intro text:', e)
+      }
+    }
+    loadIntro()
   }, [])
 
   const handleNewPost = async () => {
@@ -347,19 +355,52 @@ function PostEditor({ id }: { id: string }) {
 
 function Settings() {
   const [text, setText] = useState<string>('')
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    try {
-      const v = localStorage.getItem('noet.introText') || ''
-      setText(v)
-    } catch {}
+    const loadSettings = async () => {
+      try {
+        const res = await fetch('/api/settings?key=introText')
+        if (res.ok) {
+          const data = await res.json()
+          setText(data.value || '')
+        }
+      } catch (e) {
+        console.error('Failed to load settings:', e)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadSettings()
   }, [])
 
-  const handleSave = () => {
+  const handleSave = async () => {
+    setSaving(true)
     try {
-      localStorage.setItem('noet.introText', text)
-    } catch {}
-    window.location.assign('/')
+      const res = await fetch('/api/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'introText', value: text })
+      })
+      if (!res.ok) throw new Error('Failed to save settings')
+      window.location.assign('/')
+    } catch (e) {
+      console.error('Failed to save settings:', e)
+      alert('Failed to save settings')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="app-container settings-page">
+        <main style={{ maxWidth: 800, margin: '0 auto' }}>
+          <p>Loading settings...</p>
+        </main>
+      </div>
+    )
   }
 
   return (
@@ -373,10 +414,36 @@ function Settings() {
           rows={6}
           style={{ width: '100%', fontFamily: 'Inter, system-ui, sans-serif', fontSize: 14, padding: 10, boxSizing: 'border-box' }}
           placeholder="Write a short introduction to show on the homepage"
+          disabled={saving}
         />
         <div style={{ marginTop: 10, display: 'flex', gap: 8 }}>
-          <button onClick={handleSave} style={{ background: '#fff', border: '1px solid #d1d5db', borderRadius: 8, padding: '8px 12px', cursor: 'pointer' }}>Save</button>
-          <button onClick={() => window.location.assign('/')} style={{ background: 'transparent', border: 'none', color: '#111', cursor: 'pointer' }}>Cancel</button>
+          <button 
+            onClick={handleSave} 
+            disabled={saving}
+            style={{ 
+              background: '#fff', 
+              border: '1px solid #d1d5db', 
+              borderRadius: 8, 
+              padding: '8px 12px', 
+              cursor: saving ? 'default' : 'pointer',
+              opacity: saving ? 0.6 : 1
+            }}
+          >
+            {saving ? 'Saving...' : 'Save'}
+          </button>
+          <button 
+            onClick={() => window.location.assign('/')} 
+            disabled={saving}
+            style={{ 
+              background: 'transparent', 
+              border: 'none', 
+              color: '#111', 
+              cursor: saving ? 'default' : 'pointer',
+              opacity: saving ? 0.6 : 1
+            }}
+          >
+            Cancel
+          </button>
         </div>
       </main>
     </div>

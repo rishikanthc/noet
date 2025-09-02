@@ -65,6 +65,12 @@ CREATE TABLE IF NOT EXISTS posts (
   created_at DATETIME NOT NULL,
   updated_at DATETIME NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at DATETIME NOT NULL
+);
 `)
     return err
 }
@@ -220,6 +226,76 @@ func (a *App) routes() {
             }
             w.WriteHeader(http.StatusNoContent)
             go a.broadcast("post-deleted", map[string]string{"id": idStr})
+            return
+        default:
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+    })
+
+    // Settings endpoints
+    mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
+        switch r.Method {
+        case http.MethodGet:
+            // Get all settings or specific setting by key query param
+            key := r.URL.Query().Get("key")
+            if key != "" {
+                // Get specific setting
+                var value string
+                err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+                if err != nil {
+                    if errors.Is(err, sql.ErrNoRows) {
+                        w.Header().Set("Content-Type", "application/json")
+                        _ = json.NewEncoder(w).Encode(map[string]string{"value": ""})
+                        return
+                    }
+                    http.Error(w, "db error", http.StatusInternalServerError)
+                    return
+                }
+                w.Header().Set("Content-Type", "application/json")
+                _ = json.NewEncoder(w).Encode(map[string]string{"value": value})
+                return
+            }
+            // Get all settings
+            rows, err := a.DB.Query(`SELECT key, value FROM settings`)
+            if err != nil {
+                http.Error(w, "db error", http.StatusInternalServerError)
+                return
+            }
+            defer rows.Close()
+            settings := make(map[string]string)
+            for rows.Next() {
+                var k, v string
+                if err := rows.Scan(&k, &v); err != nil {
+                    http.Error(w, "db error", http.StatusInternalServerError)
+                    return
+                }
+                settings[k] = v
+            }
+            w.Header().Set("Content-Type", "application/json")
+            _ = json.NewEncoder(w).Encode(settings)
+            return
+        case http.MethodPut:
+            var payload struct {
+                Key   string `json:"key"`
+                Value string `json:"value"`
+            }
+            if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+                http.Error(w, "invalid json", http.StatusBadRequest)
+                return
+            }
+            if payload.Key == "" {
+                http.Error(w, "key is required", http.StatusBadRequest)
+                return
+            }
+            now := time.Now()
+            _, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)`, payload.Key, payload.Value, now)
+            if err != nil {
+                http.Error(w, "db error", http.StatusInternalServerError)
+                return
+            }
+            w.Header().Set("Content-Type", "application/json")
+            _ = json.NewEncoder(w).Encode(map[string]string{"key": payload.Key, "value": payload.Value})
             return
         default:
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
