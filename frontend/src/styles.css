@@ -14,7 +14,12 @@
   --muted: #666666;
 }
 
-html, body, #root { height: 100%; }
+html,
+body,
+#root {
+  height: 100%;
+}
+
 body {
   margin: 0;
   /* Interface defaults to Inter */
@@ -25,7 +30,10 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-.app-container { padding: 32px 24px; }
+.app-container {
+  padding: 32px 24px;
+}
+
 /* Home page layout */
 .home-container {
   position: relative;
@@ -35,22 +43,38 @@ body {
   font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
   font-weight: 400;
 }
-.home-content { 
-  padding: 56px 24px 24px; 
-  max-width: 800px; 
-  margin: 0 auto; 
-  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; 
-  line-height: 1.7; 
+
+.home-content {
+  padding: 56px 24px 24px;
+  max-width: 800px;
+  margin: 0 auto;
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  line-height: 1.7;
 }
-.home-content h1 { 
-  margin: 0 0 12px; 
-  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial; 
-  font-weight: 600; 
-  letter-spacing: -0.01em; 
+
+.home-content h1 {
+  margin: 0 0 12px;
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-weight: 600;
+  letter-spacing: -0.01em;
 }
-.intro-block { margin: 0 0 24px; color: #333; white-space: pre-wrap; }
-.post-list { list-style: none; padding: 0; margin: 12px 0 0; }
-.post-list li { margin: 0; }
+
+.intro-block {
+  margin: 0 0 24px;
+  color: #333;
+  white-space: pre-wrap;
+}
+
+.post-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+}
+
+.post-list li {
+  margin: 0;
+}
+
 .post-link {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -60,9 +84,24 @@ body {
   text-decoration: none;
   color: inherit;
 }
-.post-link:hover { background: #fafafa; }
-.post-title { font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.post-meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
+.post-link:hover {
+  background: #fafafa;
+}
+
+.post-title {
+  font-weight: 400;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.post-meta {
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .new-post-link {
   position: absolute;
   top: 16px;
@@ -73,7 +112,11 @@ body {
   font-weight: 400;
   cursor: pointer;
 }
-.new-post-link:disabled { opacity: 0.6; cursor: default; }
+
+.new-post-link:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
 
 .settings-link {
   position: absolute;
@@ -95,8 +138,9 @@ body {
   height: 10px;
   background: #000;
   border-radius: 50%;
-  box-shadow: 0 0 0 2px rgba(255,255,255,0.9);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
 }
+
 header h1 {
   margin: 0 0 12px;
   font-family: 'Space Grotesk', sans-serif;
@@ -104,10 +148,21 @@ header h1 {
 }
 
 /* Page-specific fonts */
-.settings-page { font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; font-weight: 400; }
-.editor-page { font-family: 'Noto Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji'; }
+.settings-page {
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
+  font-weight: 400;
+}
 
-.demo-controls { display: flex; gap: 8px; margin-bottom: 16px; }
+.editor-page {
+  font-family: 'Noto Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
+}
+
+.demo-controls {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
 .demo-controls button {
   background: #ffffff;
   border: 1px solid #d1d5db;
@@ -115,21 +170,32 @@ header h1 {
   border-radius: 8px;
   padding: 8px 12px;
 }
-.demo-controls button:hover { background: #f5f5f5; cursor: pointer; }
+
+.demo-controls button:hover {
+  background: #f5f5f5;
+  cursor: pointer;
+}
 
 /* Editor content styles are imported above */
 .editor-wrap {
   max-width: 900px;
   margin: 0 auto;
 }
+
 /* Editor typography: relaxed, readable */
 .editor-page .quill-editor .ProseMirror {
-  font-size: 17px;           /* comfortable body size */
-  line-height: 1.8;          /* relaxed line height */
-  letter-spacing: 0.005em;   /* subtle tracking for readability */
+  font-size: 17px;
+  /* comfortable body size */
+  line-height: 1.8;
+  /* relaxed line height */
+  letter-spacing: 0.005em;
+  /* subtle tracking for readability */
   color: #111;
 }
-.editor-page .quill-editor .ProseMirror p { margin: 0 0 0.9em; }
+
+.editor-page .quill-editor .ProseMirror p {
+  margin: 0 0 0.9em;
+}
 
 /* Headings use Space Grotesk on post page */
 .editor-page .quill-editor .ProseMirror h1,
@@ -144,12 +210,30 @@ header h1 {
   letter-spacing: -0.01em;
   margin: 1.6em 0 0.6em;
 }
-.editor-page .quill-editor .ProseMirror h1 { font-size: 2.25rem; }
-.editor-page .quill-editor .ProseMirror h2 { font-size: 1.875rem; }
-.editor-page .quill-editor .ProseMirror h3 { font-size: 1.5rem; }
-.editor-page .quill-editor .ProseMirror h4 { font-size: 1.25rem; }
-.editor-page .quill-editor .ProseMirror h5 { font-size: 1.125rem; }
-.editor-page .quill-editor .ProseMirror h6 { font-size: 1rem; }
+
+.editor-page .quill-editor .ProseMirror h1 {
+  font-size: 2.25rem;
+}
+
+.editor-page .quill-editor .ProseMirror h2 {
+  font-size: 1.875rem;
+}
+
+.editor-page .quill-editor .ProseMirror h3 {
+  font-size: 1.5rem;
+}
+
+.editor-page .quill-editor .ProseMirror h4 {
+  font-size: 1.25rem;
+}
+
+.editor-page .quill-editor .ProseMirror h5 {
+  font-size: 1.125rem;
+}
+
+.editor-page .quill-editor .ProseMirror h6 {
+  font-size: 1rem;
+}
 
 /* Links */
 .editor-page .quill-editor .ProseMirror a {
@@ -168,8 +252,14 @@ header h1 {
 
 /* Lists */
 .editor-page .quill-editor .ProseMirror ul,
-.editor-page .quill-editor .ProseMirror ol { padding-left: 1.25em; margin: 0.6em 0 0.9em; }
-.editor-page .quill-editor .ProseMirror li { margin: 0.3em 0; }
+.editor-page .quill-editor .ProseMirror ol {
+  padding-left: 1.25em;
+  margin: 0.6em 0 0.9em;
+}
+
+.editor-page .quill-editor .ProseMirror li {
+  margin: 0.3em 0;
+}
 
 /* Code */
 .editor-page .quill-editor .ProseMirror code {
@@ -179,12 +269,14 @@ header h1 {
   padding: 0.12em 0.35em;
   border-radius: 4px;
 }
+
 .editor-page .quill-editor .ProseMirror pre code {
   display: block;
   padding: 12px;
   border-radius: 8px;
   line-height: 1.6;
 }
+
 .back-link {
   background: transparent;
   border: none;
@@ -434,9 +526,10 @@ header h1 {
 .site-title {
   /* Sleek, not-too-thick display */
   font-family: 'Outfit', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  font-size: 40px;
-  font-weight: 300; /* Outfit Light */
-  color: #111111;
+  font-size: 60px;
+  font-weight: 300;
+  /* Outfit Light */
+  color: #000;
   margin: 0;
   letter-spacing: -0.02em;
   line-height: 1.08;
@@ -445,7 +538,8 @@ header h1 {
 .site-title.empty {
   font-family: 'Outfit', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   font-size: 26px;
-  font-weight: 300; /* Outfit Light */
+  font-weight: 300;
+  /* Outfit Light */
   color: #666666;
   font-style: italic;
 }
