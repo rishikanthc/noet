@@ -1,8 +1,272 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, createContext, useContext } from 'react'
 import Editor, { type EditorRef } from '@quill/Editor'
 import './styles.css'
 
 type Note = { id: number; title?: string; content?: string; createdAt?: string; updatedAt?: string }
+
+type User = {
+  id: number
+  username: string
+}
+
+type AuthContextType = {
+  user: User | null
+  token: string | null
+  login: (username: string, password: string) => Promise<boolean>
+  register: (username: string, password: string) => Promise<boolean>
+  logout: () => void
+  isAuthenticated: boolean
+}
+
+const AuthContext = createContext<AuthContextType | null>(null)
+
+function useAuth() {
+  const context = useContext(AuthContext)
+  if (!context) {
+    throw new Error('useAuth must be used within AuthProvider')
+  }
+  return context
+}
+
+function AuthProvider({ children }: { children: React.ReactNode }) {
+  const [user, setUser] = useState<User | null>(null)
+  const [token, setToken] = useState<string | null>(null)
+
+  useEffect(() => {
+    // Check for existing token in localStorage
+    const savedToken = localStorage.getItem('auth_token')
+    if (savedToken) {
+      // Validate token
+      fetch('/api/auth/validate', {
+        headers: { Authorization: `Bearer ${savedToken}` }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.valid) {
+          setToken(savedToken)
+          setUser(data.user)
+        } else {
+          localStorage.removeItem('auth_token')
+        }
+      })
+      .catch(() => {
+        localStorage.removeItem('auth_token')
+      })
+    }
+  }, [])
+
+  const login = async (username: string, password: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      })
+      
+      if (res.ok) {
+        const data = await res.json()
+        setToken(data.token)
+        setUser(data.user)
+        localStorage.setItem('auth_token', data.token)
+        return true
+      }
+      return false
+    } catch {
+      return false
+    }
+  }
+
+  const logout = () => {
+    setToken(null)
+    setUser(null)
+    localStorage.removeItem('auth_token')
+  }
+
+  const register = async (username: string, password: string): Promise<boolean> => {
+    try {
+      const res = await fetch('/api/setup/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password })
+      })
+      
+      if (res.ok) {
+        const data = await res.json()
+        setToken(data.token)
+        setUser(data.user)
+        localStorage.setItem('auth_token', data.token)
+        return true
+      }
+      return false
+    } catch {
+      return false
+    }
+  }
+
+  return (
+    <AuthContext.Provider value={{
+      user,
+      token,
+      login,
+      register,
+      logout,
+      isAuthenticated: !!token && !!user
+    }}>
+      {children}
+    </AuthContext.Provider>
+  )
+}
+
+function Registration() {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const { register } = useAuth()
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!username || !password || !confirmPassword) {
+      setError('Please fill in all fields')
+      return
+    }
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match')
+      return
+    }
+
+    if (password.length < 3) {
+      setError('Password must be at least 3 characters')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+
+    const success = await register(username, password)
+    if (success) {
+      window.location.assign('/')
+    } else {
+      setError('Registration failed. Please try again.')
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="login-container">
+      <div className="login-content">
+        <h1>Create Admin Account</h1>
+        <p style={{ marginBottom: '24px', color: '#666', textAlign: 'center', fontSize: '14px' }}>
+          Set up your admin account to get started
+        </p>
+        <form onSubmit={handleSubmit} className="login-form">
+          {error && <div className="error-message">{error}</div>}
+          <div className="form-group">
+            <label htmlFor="username">Username</label>
+            <input
+              type="text"
+              id="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={loading}
+              autoFocus
+              placeholder="Enter your username"
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="password">Password</label>
+            <input
+              type="password"
+              id="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={loading}
+              placeholder="Enter your password"
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="confirmPassword">Confirm Password</label>
+            <input
+              type="password"
+              id="confirmPassword"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              disabled={loading}
+              placeholder="Confirm your password"
+            />
+          </div>
+          <button type="submit" className="login-button" disabled={loading}>
+            {loading ? 'Creating Account...' : 'Create Account'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+function Login() {
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const { login } = useAuth()
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!username || !password) {
+      setError('Please fill in all fields')
+      return
+    }
+
+    setLoading(true)
+    setError('')
+
+    const success = await login(username, password)
+    if (success) {
+      window.location.assign('/')
+    } else {
+      setError('Invalid credentials')
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="login-container">
+      <div className="login-content">
+        <h1>Admin Login</h1>
+        <form onSubmit={handleSubmit} className="login-form">
+          {error && <div className="error-message">{error}</div>}
+          <div className="form-group">
+            <label htmlFor="username">Username</label>
+            <input
+              type="text"
+              id="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              disabled={loading}
+              autoFocus
+            />
+          </div>
+          <div className="form-group">
+            <label htmlFor="password">Password</label>
+            <input
+              type="password"
+              id="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              disabled={loading}
+            />
+          </div>
+          <button type="submit" className="login-button" disabled={loading}>
+            {loading ? 'Signing In...' : 'Sign In'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
 
 function ContextMenu({ x, y, onDelete, onClose }: { x: number; y: number; onDelete: () => void; onClose: () => void }) {
   useEffect(() => {
@@ -64,6 +328,7 @@ function ConfirmDialog({ message, onConfirm, onCancel }: { message: string; onCo
 }
 
 function Home() {
+  const { isAuthenticated, logout, token } = useAuth()
   const [creating, setCreating] = useState(false)
   const [posts, setPosts] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
@@ -175,10 +440,13 @@ function Home() {
   }, [])
 
   const handleNewPost = async () => {
-    if (creating) return
+    if (creating || !isAuthenticated) return
     setCreating(true)
     try {
-      const res = await fetch('/api/posts', { method: 'POST' })
+      const res = await fetch('/api/posts', { 
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {}
+      })
       if (!res.ok) throw new Error(`Failed to create note: ${res.status}`)
       const note = await res.json()
       window.location.assign(`/posts/${note.id}`)
@@ -191,8 +459,12 @@ function Home() {
   }
 
   const handleDeletePost = async (postId: number) => {
+    if (!isAuthenticated || !token) return
     try {
-      const res = await fetch(`/api/posts/${postId}`, { method: 'DELETE' })
+      const res = await fetch(`/api/posts/${postId}`, { 
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
       if (!res.ok) throw new Error(`Failed to delete post: ${res.status}`)
       // Remove post from local state immediately for responsive UI
       setPosts(prev => prev.filter(p => p.id !== postId))
@@ -203,6 +475,7 @@ function Home() {
   }
 
   const handleRightClick = (e: React.MouseEvent, postId: number) => {
+    if (!isAuthenticated) return
     e.preventDefault()
     setContextMenu({ x: e.clientX, y: e.clientY, postId })
   }
@@ -220,12 +493,19 @@ function Home() {
 
   return (
     <div className="home-container">
-      <button className="settings-link" onClick={() => window.location.assign('/settings')}>
-        Settings
-      </button>
-      <button className="new-post-link" onClick={handleNewPost} disabled={creating}>
-        New Post
-      </button>
+      {isAuthenticated && (
+        <>
+          <button className="settings-link" onClick={() => window.location.assign('/settings')}>
+            Settings
+          </button>
+          <button className="new-post-link" onClick={handleNewPost} disabled={creating}>
+            New Post
+          </button>
+          <button className="logout-button" onClick={logout}>
+            Logout
+          </button>
+        </>
+      )}
       <div className="home-content">
         {intro && intro.trim() && (
           <div className="intro-block">{intro}</div>
@@ -282,6 +562,7 @@ function Home() {
 }
 
 function PostEditor({ id }: { id: string }) {
+  const { isAuthenticated, token } = useAuth()
   const [content, setContent] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string|undefined>()
@@ -324,16 +605,20 @@ function PostEditor({ id }: { id: string }) {
           <Editor
             ref={editorRef}
             content={content}
-            onChange={(html) => {
+            editable={isAuthenticated}
+            onChange={isAuthenticated ? (html) => {
               setContent(html)
               latestContentRef.current = html
               setDirty(true)
-            }}
-            onAutoSave={async (html) => {
+            } : undefined}
+            onAutoSave={isAuthenticated ? async (html) => {
               try {
                 const res = await fetch(`/api/posts/${id}`, {
                   method: 'PUT',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: { 
+                    'Content-Type': 'application/json',
+                    ...(token ? { Authorization: `Bearer ${token}` } : {})
+                  },
                   body: JSON.stringify({ content: html })
                 })
                 if (!res.ok) throw new Error(`Failed to save note: ${res.status}`)
@@ -345,7 +630,7 @@ function PostEditor({ id }: { id: string }) {
                 console.error(e)
                 // keep dirty = true so the dot stays visible
               }
-            }}
+            } : undefined}
           />
         </div>
       </main>
@@ -354,6 +639,7 @@ function PostEditor({ id }: { id: string }) {
 }
 
 function Settings() {
+  const { isAuthenticated, token } = useAuth()
   const [text, setText] = useState<string>('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -376,11 +662,15 @@ function Settings() {
   }, [])
 
   const handleSave = async () => {
+    if (!isAuthenticated || !token) return
     setSaving(true)
     try {
       const res = await fetch('/api/settings', {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
         body: JSON.stringify({ key: 'introText', value: text })
       })
       if (!res.ok) throw new Error('Failed to save settings')
@@ -391,6 +681,17 @@ function Settings() {
     } finally {
       setSaving(false)
     }
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="app-container settings-page">
+        <main style={{ maxWidth: 800, margin: '0 auto' }}>
+          <p>Access denied. Please log in to access settings.</p>
+          <button onClick={() => window.location.assign('/admin')}>Go to Login</button>
+        </main>
+      </div>
+    )
   }
 
   if (loading) {
@@ -450,13 +751,57 @@ function Settings() {
   )
 }
 
-export default function App() {
+function AppContent() {
+  const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
+  const [setupLoading, setSetupLoading] = useState(true)
+
   const path = typeof window !== 'undefined' ? window.location.pathname : '/'
   const match = useMemo(() => {
     const m = path.match(/^\/posts\/([A-Za-z0-9_-]+)$/)
     return m?.[1]
   }, [path])
 
+  useEffect(() => {
+    // Check if setup is needed on app start
+    const checkSetupStatus = async () => {
+      try {
+        const res = await fetch('/api/setup/status')
+        if (res.ok) {
+          const data = await res.json()
+          setNeedsSetup(data.needsSetup)
+        }
+      } catch (e) {
+        console.error('Failed to check setup status:', e)
+        // Assume setup is not needed if we can't check
+        setNeedsSetup(false)
+      } finally {
+        setSetupLoading(false)
+      }
+    }
+    
+    checkSetupStatus()
+  }, [])
+
+  // Show loading while checking setup status
+  if (setupLoading) {
+    return (
+      <div className="login-container">
+        <div className="login-content">
+          <p>Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Show registration page if setup is needed
+  if (needsSetup) {
+    return <Registration />
+  }
+
+  // Normal app routing
+  if (path === '/admin') {
+    return <Login />
+  }
   if (match) {
     return <PostEditor id={match} />
   }
@@ -464,4 +809,12 @@ export default function App() {
     return <Settings />
   }
   return <Home />
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AppContent />
+    </AuthProvider>
+  )
 }

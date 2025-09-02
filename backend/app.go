@@ -1,6 +1,7 @@
 package main
 
 import (
+    "crypto/rand"
     "database/sql"
     "embed"
     "encoding/json"
@@ -15,14 +16,17 @@ import (
     "time"
 
     _ "modernc.org/sqlite"
+    "golang.org/x/crypto/bcrypt"
+    "github.com/golang-jwt/jwt/v5"
 )
 
 //go:embed static/*
 var staticFS embed.FS
 
 type App struct {
-    DB  *sql.DB
-    Mux *http.ServeMux
+    DB        *sql.DB
+    Mux       *http.ServeMux
+    JWTSecret []byte
 
     // SSE
     clientsMu    sync.Mutex
@@ -38,6 +42,19 @@ type Post struct {
     UpdatedAt time.Time `json:"updatedAt"`
 }
 
+type User struct {
+    ID           int64     `json:"id"`
+    Username     string    `json:"username"`
+    PasswordHash string    `json:"-"`
+    CreatedAt    time.Time `json:"createdAt"`
+}
+
+type Claims struct {
+    UserID   int64  `json:"user_id"`
+    Username string `json:"username"`
+    jwt.RegisteredClaims
+}
+
 func NewApp(dbPath string) (*App, error) {
     db, err := sql.Open("sqlite", dbPath)
     if err != nil {
@@ -51,7 +68,19 @@ func NewApp(dbPath string) (*App, error) {
         return nil, err
     }
 
-    a := &App{DB: db, Mux: http.NewServeMux(), clients: make(map[int]chan string)}
+    // Generate JWT secret
+    jwtSecret := make([]byte, 32)
+    if _, err := rand.Read(jwtSecret); err != nil {
+        return nil, fmt.Errorf("failed to generate JWT secret: %v", err)
+    }
+
+    a := &App{
+        DB:        db, 
+        Mux:       http.NewServeMux(), 
+        JWTSecret: jwtSecret,
+        clients:   make(map[int]chan string),
+    }
+    
     a.routes()
     return a, nil
 }
@@ -71,8 +100,129 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT NOT NULL,
   updated_at DATETIME NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at DATETIME NOT NULL
+);
 `)
     return err
+}
+
+func (a *App) hasAnyUsers() (bool, error) {
+    var count int
+    err := a.DB.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
+    if err != nil {
+        return false, err
+    }
+    return count > 0, nil
+}
+
+func (a *App) createUser(username, password string) (*User, error) {
+    // Check if any users already exist
+    hasUsers, err := a.hasAnyUsers()
+    if err != nil {
+        return nil, err
+    }
+    if hasUsers {
+        return nil, errors.New("user registration is not allowed - user already exists")
+    }
+    
+    // Hash password
+    passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+    if err != nil {
+        return nil, err
+    }
+    
+    // Insert user
+    res, err := a.DB.Exec(`INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)`, 
+        username, string(passwordHash), time.Now())
+    if err != nil {
+        return nil, err
+    }
+    
+    id, err := res.LastInsertId()
+    if err != nil {
+        return nil, err
+    }
+    
+    return &User{
+        ID:       id,
+        Username: username,
+        CreatedAt: time.Now(),
+    }, nil
+}
+
+func (a *App) authenticateUser(username, password string) (*User, error) {
+    var user User
+    row := a.DB.QueryRow(`SELECT id, username, password_hash, created_at FROM users WHERE username = ?`, username)
+    err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
+    if err != nil {
+        return nil, err
+    }
+    
+    err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
+    if err != nil {
+        return nil, err
+    }
+    
+    return &user, nil
+}
+
+func (a *App) generateJWT(user *User) (string, error) {
+    claims := Claims{
+        UserID:   user.ID,
+        Username: user.Username,
+        RegisteredClaims: jwt.RegisteredClaims{
+            ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+            IssuedAt:  jwt.NewNumericDate(time.Now()),
+        },
+    }
+    
+    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+    return token.SignedString(a.JWTSecret)
+}
+
+func (a *App) validateJWT(tokenString string) (*Claims, error) {
+    token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+        return a.JWTSecret, nil
+    })
+    
+    if err != nil {
+        return nil, err
+    }
+    
+    if claims, ok := token.Claims.(*Claims); ok && token.Valid {
+        return claims, nil
+    }
+    
+    return nil, errors.New("invalid token")
+}
+
+func (a *App) requireAuth(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        authHeader := r.Header.Get("Authorization")
+        if authHeader == "" {
+            http.Error(w, "unauthorized", http.StatusUnauthorized)
+            return
+        }
+        
+        tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+        if tokenString == authHeader {
+            http.Error(w, "invalid authorization header", http.StatusUnauthorized)
+            return
+        }
+        
+        _, err := a.validateJWT(tokenString)
+        if err != nil {
+            http.Error(w, "invalid token", http.StatusUnauthorized)
+            return
+        }
+        
+        next(w, r)
+    }
 }
 
 // helper to extract first <h1> inner text from HTML
@@ -119,22 +269,170 @@ func (a *App) routes() {
         _ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
     })
 
+    // Check if setup is needed
+    mux.HandleFunc("/api/setup/status", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        
+        hasUsers, err := a.hasAnyUsers()
+        if err != nil {
+            http.Error(w, "database error", http.StatusInternalServerError)
+            return
+        }
+        
+        w.Header().Set("Content-Type", "application/json")
+        _ = json.NewEncoder(w).Encode(map[string]bool{
+            "needsSetup": !hasUsers,
+        })
+    })
+
+    // User registration (only allowed if no users exist)
+    mux.HandleFunc("/api/setup/register", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        
+        var payload struct {
+            Username string `json:"username"`
+            Password string `json:"password"`
+        }
+        
+        if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+            http.Error(w, "invalid json", http.StatusBadRequest)
+            return
+        }
+        
+        if payload.Username == "" || payload.Password == "" {
+            http.Error(w, "username and password are required", http.StatusBadRequest)
+            return
+        }
+        
+        if len(payload.Password) < 3 {
+            http.Error(w, "password must be at least 3 characters", http.StatusBadRequest)
+            return
+        }
+        
+        user, err := a.createUser(payload.Username, payload.Password)
+        if err != nil {
+            if err.Error() == "user registration is not allowed - user already exists" {
+                http.Error(w, "registration not allowed", http.StatusForbidden)
+            } else {
+                http.Error(w, "failed to create user", http.StatusInternalServerError)
+            }
+            return
+        }
+        
+        token, err := a.generateJWT(user)
+        if err != nil {
+            http.Error(w, "failed to generate token", http.StatusInternalServerError)
+            return
+        }
+        
+        w.Header().Set("Content-Type", "application/json")
+        _ = json.NewEncoder(w).Encode(map[string]interface{}{
+            "token": token,
+            "user": map[string]interface{}{
+                "id": user.ID,
+                "username": user.Username,
+            },
+        })
+    })
+
+    // Auth endpoints
+    mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        
+        var payload struct {
+            Username string `json:"username"`
+            Password string `json:"password"`
+        }
+        
+        if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+            http.Error(w, "invalid json", http.StatusBadRequest)
+            return
+        }
+        
+        user, err := a.authenticateUser(payload.Username, payload.Password)
+        if err != nil {
+            http.Error(w, "invalid credentials", http.StatusUnauthorized)
+            return
+        }
+        
+        token, err := a.generateJWT(user)
+        if err != nil {
+            http.Error(w, "failed to generate token", http.StatusInternalServerError)
+            return
+        }
+        
+        w.Header().Set("Content-Type", "application/json")
+        _ = json.NewEncoder(w).Encode(map[string]interface{}{
+            "token": token,
+            "user": map[string]interface{}{
+                "id": user.ID,
+                "username": user.Username,
+            },
+        })
+    })
+
+    mux.HandleFunc("/api/auth/validate", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        
+        authHeader := r.Header.Get("Authorization")
+        if authHeader == "" {
+            http.Error(w, "unauthorized", http.StatusUnauthorized)
+            return
+        }
+        
+        tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+        if tokenString == authHeader {
+            http.Error(w, "invalid authorization header", http.StatusUnauthorized)
+            return
+        }
+        
+        claims, err := a.validateJWT(tokenString)
+        if err != nil {
+            http.Error(w, "invalid token", http.StatusUnauthorized)
+            return
+        }
+        
+        w.Header().Set("Content-Type", "application/json")
+        _ = json.NewEncoder(w).Encode(map[string]interface{}{
+            "valid": true,
+            "user": map[string]interface{}{
+                "id": claims.UserID,
+                "username": claims.Username,
+            },
+        })
+    })
+
     // Posts collection: POST(create) and GET(list)
     mux.HandleFunc("/api/posts", func(w http.ResponseWriter, r *http.Request) {
         switch r.Method {
         case http.MethodPost:
-            now := time.Now()
-            res, err := a.DB.Exec(`INSERT INTO posts(title, content, created_at, updated_at) VALUES(NULL, '', ?, ?)`, now, now)
-            if err != nil {
-                http.Error(w, "db error", http.StatusInternalServerError)
-                return
-            }
-            id, _ := res.LastInsertId()
-            p := Post{ID: id, Title: nil, Content: "", CreatedAt: now, UpdatedAt: now}
-            w.Header().Set("Content-Type", "application/json")
-            w.WriteHeader(http.StatusCreated)
-            _ = json.NewEncoder(w).Encode(p)
-            go a.broadcast("post-created", p)
+            // Protect post creation
+            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+                now := time.Now()
+                res, err := a.DB.Exec(`INSERT INTO posts(title, content, created_at, updated_at) VALUES(NULL, '', ?, ?)`, now, now)
+                if err != nil {
+                    http.Error(w, "db error", http.StatusInternalServerError)
+                    return
+                }
+                id, _ := res.LastInsertId()
+                p := Post{ID: id, Title: nil, Content: "", CreatedAt: now, UpdatedAt: now}
+                w.Header().Set("Content-Type", "application/json")
+                w.WriteHeader(http.StatusCreated)
+                _ = json.NewEncoder(w).Encode(p)
+                go a.broadcast("post-created", p)
+            })(w, r)
             return
         case http.MethodGet:
             rows, err := a.DB.Query(`SELECT id, title, content, created_at, updated_at FROM posts ORDER BY updated_at DESC, created_at DESC`)
@@ -188,44 +486,50 @@ func (a *App) routes() {
             _ = json.NewEncoder(w).Encode(p)
             return
         case http.MethodPut:
-            var payload struct{ Content string `json:"content"` }
-            if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-                http.Error(w, "invalid json", http.StatusBadRequest)
-                return
-            }
-            title := extractTitleFromHTML(payload.Content)
-            var titlePtr *string
-            if strings.TrimSpace(title) != "" {
-                titlePtr = &title
-            }
-            now := time.Now()
-            // update
-            _, err := a.DB.Exec(`UPDATE posts SET title = ?, content = ?, updated_at = ? WHERE id = ?`, titlePtr, payload.Content, now, idStr)
-            if err != nil {
-                http.Error(w, "db error", http.StatusInternalServerError)
-                return
-            }
-            p, err := a.getPost(idStr)
-            if err != nil {
-                if errors.Is(err, sql.ErrNoRows) {
-                    http.NotFound(w, r)
-                } else {
-                    http.Error(w, "db error", http.StatusInternalServerError)
+            // Protect post updates
+            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+                var payload struct{ Content string `json:"content"` }
+                if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+                    http.Error(w, "invalid json", http.StatusBadRequest)
+                    return
                 }
-                return
-            }
-            w.Header().Set("Content-Type", "application/json")
-            _ = json.NewEncoder(w).Encode(p)
-            go a.broadcast("post-updated", p)
+                title := extractTitleFromHTML(payload.Content)
+                var titlePtr *string
+                if strings.TrimSpace(title) != "" {
+                    titlePtr = &title
+                }
+                now := time.Now()
+                // update
+                _, err := a.DB.Exec(`UPDATE posts SET title = ?, content = ?, updated_at = ? WHERE id = ?`, titlePtr, payload.Content, now, idStr)
+                if err != nil {
+                    http.Error(w, "db error", http.StatusInternalServerError)
+                    return
+                }
+                p, err := a.getPost(idStr)
+                if err != nil {
+                    if errors.Is(err, sql.ErrNoRows) {
+                        http.NotFound(w, r)
+                    } else {
+                        http.Error(w, "db error", http.StatusInternalServerError)
+                    }
+                    return
+                }
+                w.Header().Set("Content-Type", "application/json")
+                _ = json.NewEncoder(w).Encode(p)
+                go a.broadcast("post-updated", p)
+            })(w, r)
             return
         case http.MethodDelete:
-            _, err := a.DB.Exec(`DELETE FROM posts WHERE id = ?`, idStr)
-            if err != nil {
-                http.Error(w, "db error", http.StatusInternalServerError)
-                return
-            }
-            w.WriteHeader(http.StatusNoContent)
-            go a.broadcast("post-deleted", map[string]string{"id": idStr})
+            // Protect post deletion
+            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+                _, err := a.DB.Exec(`DELETE FROM posts WHERE id = ?`, idStr)
+                if err != nil {
+                    http.Error(w, "db error", http.StatusInternalServerError)
+                    return
+                }
+                w.WriteHeader(http.StatusNoContent)
+                go a.broadcast("post-deleted", map[string]string{"id": idStr})
+            })(w, r)
             return
         default:
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -276,26 +580,29 @@ func (a *App) routes() {
             _ = json.NewEncoder(w).Encode(settings)
             return
         case http.MethodPut:
-            var payload struct {
-                Key   string `json:"key"`
-                Value string `json:"value"`
-            }
-            if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-                http.Error(w, "invalid json", http.StatusBadRequest)
-                return
-            }
-            if payload.Key == "" {
-                http.Error(w, "key is required", http.StatusBadRequest)
-                return
-            }
-            now := time.Now()
-            _, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)`, payload.Key, payload.Value, now)
-            if err != nil {
-                http.Error(w, "db error", http.StatusInternalServerError)
-                return
-            }
-            w.Header().Set("Content-Type", "application/json")
-            _ = json.NewEncoder(w).Encode(map[string]string{"key": payload.Key, "value": payload.Value})
+            // Protect settings updates
+            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+                var payload struct {
+                    Key   string `json:"key"`
+                    Value string `json:"value"`
+                }
+                if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+                    http.Error(w, "invalid json", http.StatusBadRequest)
+                    return
+                }
+                if payload.Key == "" {
+                    http.Error(w, "key is required", http.StatusBadRequest)
+                    return
+                }
+                now := time.Now()
+                _, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)`, payload.Key, payload.Value, now)
+                if err != nil {
+                    http.Error(w, "db error", http.StatusInternalServerError)
+                    return
+                }
+                w.Header().Set("Content-Type", "application/json")
+                _ = json.NewEncoder(w).Encode(map[string]string{"key": payload.Key, "value": payload.Value})
+            })(w, r)
             return
         default:
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
