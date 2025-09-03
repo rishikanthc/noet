@@ -268,7 +268,7 @@ function Login() {
   )
 }
 
-function Header({ siteTitle, isAuthenticated, onLogout, onNewPost, onSettings, creating, showBack, onBack }: {
+function Header({ siteTitle, isAuthenticated, onLogout, onNewPost, onSettings, creating, showBack, onBack, latestPostId }: {
   siteTitle: string
   isAuthenticated: boolean
   onLogout: () => void
@@ -277,14 +277,20 @@ function Header({ siteTitle, isAuthenticated, onLogout, onNewPost, onSettings, c
   creating: boolean
   showBack?: boolean
   onBack?: () => void
+  latestPostId?: number
 }) {
+  const path = typeof window !== 'undefined' ? window.location.pathname : '/'
   return (
     <header className="site-header">
       <div className="site-header-content">
-        <h1 className={`site-title ${!siteTitle ? 'empty' : ''}`}>
+        <a href="/" className={`site-title ${!siteTitle ? 'empty' : ''}`}>
           {siteTitle || 'Untitled Site'}
-        </h1>
-        <div className="header-actions">
+        </a>
+        <div className="header-actions" role="navigation" aria-label="Primary">
+          <a className={`header-button ${path === '/' ? 'active' : ''}`} href="/">Home</a>
+          <a className={`header-button ${/^\/posts\//.test(path) ? 'active' : ''}`} href={latestPostId ? `/posts/${latestPostId}` : '/'}>Post</a>
+          <a className={`header-button ${path === '/archive' ? 'active' : ''}`} href="/archive">Archive</a>
+          <a className="header-button" href="/rss.xml">RSS</a>
           {showBack && onBack && (
             <button className="header-button" onClick={onBack}>
               ← Back
@@ -378,6 +384,16 @@ function Home() {
   const [siteTitle, setSiteTitle] = useState<string>('')
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; postId: number } | null>(null)
   const [confirmDialog, setConfirmDialog] = useState<{ postId: number; title: string } | null>(null)
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const k = e.key.toLowerCase()
+      if (k === 'h') window.location.assign('/')
+      if (k === 'p' && posts[0]?.id != null) window.location.assign(`/posts/${posts[0].id}`)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [posts])
 
   useEffect(() => {
     let cancelled = false
@@ -543,12 +559,11 @@ function Home() {
         onNewPost={handleNewPost}
         onSettings={() => window.location.assign('/settings')}
         creating={creating}
+        latestPostId={posts[0]?.id}
       />
       <div className="home-content">
-        {intro && intro.trim() && (
-          <div className="intro-block">{intro}</div>
-        )}
-        <h1>posts</h1>
+        <p className="intro-text">{(intro && intro.trim()) ? intro : 'A text‑only blog about design, systems, and quiet craft.'}</p>
+        <h1>Latest</h1>
         {loading && <p>Loading…</p>}
         {error && <p>{error}</p>}
         {!loading && !error && (
@@ -560,12 +575,12 @@ function Home() {
                 <li key={p.id}>
                   <a 
                     href={`/posts/${p.id}`} 
-                    className="post-link"
+                    className="post-link group"
                     onContextMenu={(e) => handleRightClick(e, p.id)}
                   >
-                    <span className="post-title">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
+                    <span className="post-title group-underline">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
                     {p.updatedAt && (
-                      <span className="post-meta">{new Date(p.updatedAt).toLocaleString()}</span>
+                      <span className="post-meta">— {new Date(p.updatedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
                     )}
                   </a>
                 </li>
@@ -573,6 +588,11 @@ function Home() {
             </ul>
           )
         )}
+
+        {/* Archive link */}
+        <div style={{ marginTop: 24, fontSize: 14 }}>
+          <a className="header-button" href="/archive">View the full archive →</a>
+        </div>
       </div>
       
       {contextMenu && (
@@ -694,8 +714,15 @@ function PostEditor({ id }: { id: string }) {
 
   return (
     <div className="app-container editor-page">
-      {/* Minimal site title link in top-left for posts page */}
-      <a href="/" className="post-site-title-link site-title">{siteTitle || 'Untitled Site'}</a>
+      <Header 
+        siteTitle={siteTitle}
+        isAuthenticated={isAuthenticated}
+        onLogout={logout}
+        onNewPost={handleNewPost}
+        onSettings={() => window.location.assign('/settings')}
+        creating={false}
+        latestPostId={parseInt(id, 10)}
+      />
       {dirty && <div className="unsaved-indicator" aria-label="Unsaved changes" />}
       <main>
         <div className="editor-wrap">
@@ -886,6 +913,7 @@ function Settings() {
         onNewPost={handleNewPost}
         onSettings={() => {}}
         creating={false}
+        latestPostId={undefined}
       />
       <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
         <h1 style={{ fontWeight: 400, fontFamily: 'Inter, sans-serif' }}>Settings</h1>
@@ -1018,6 +1046,9 @@ function AppContent() {
   if (match) {
     return <PostEditor id={match} />
   }
+  if (path === '/archive') {
+    return <Archive />
+  }
   if (path === '/settings') {
     return <Settings />
   }
@@ -1029,5 +1060,83 @@ export default function App() {
     <AuthProvider>
       <AppContent />
     </AuthProvider>
+  )
+}
+
+function Archive() {
+  const { isAuthenticated, logout, token } = useAuth()
+  const [posts, setPosts] = useState<Note[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | undefined>()
+  const [siteTitle, setSiteTitle] = useState<string>('')
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        const res = await fetch('/api/posts')
+        if (res.ok) {
+          const list: Note[] = await res.json()
+          const sorted = [...list].sort((a, b) => {
+            const au = a.updatedAt ? new Date(a.updatedAt).getTime() : 0
+            const bu = b.updatedAt ? new Date(b.updatedAt).getTime() : 0
+            return bu - au
+          })
+          setPosts(sorted)
+        } else {
+          setError('Failed to load posts')
+        }
+      } catch (e) {
+        setError('Failed to load posts')
+      } finally {
+        setLoading(false)
+      }
+    }
+    const loadTitle = async () => {
+      try {
+        const res = await fetch('/api/settings')
+        if (res.ok) {
+          const data = await res.json()
+          setSiteTitle(data.siteTitle || '')
+        }
+      } catch {}
+    }
+    load()
+    loadTitle()
+  }, [])
+
+  return (
+    <div className="home-container">
+      <Header 
+        siteTitle={siteTitle}
+        isAuthenticated={isAuthenticated}
+        onLogout={logout}
+        onNewPost={() => {}}
+        onSettings={() => window.location.assign('/settings')}
+        creating={false}
+      />
+      <div className="home-content">
+        <h1>Archive</h1>
+        {loading && <p>Loading…</p>}
+        {error && <p>{error}</p>}
+        {!loading && !error && (
+          posts.length === 0 ? (
+            <p>No posts yet.</p>
+          ) : (
+            <ul className="post-list">
+              {posts.map(p => (
+                <li key={p.id}>
+                  <a href={`/posts/${p.id}`} className="post-link">
+                    <span className="post-title">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
+                    {p.updatedAt && (
+                      <span className="post-meta">— {new Date(p.updatedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                    )}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )
+        )}
+      </div>
+    </div>
   )
 }

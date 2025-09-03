@@ -9,9 +9,10 @@
 
 :root {
   --bg: #ffffff;
-  --panel: #f6f6f6;
-  --text: #111111;
-  --muted: #666666;
+  --fg: #000000;
+  --muted: #555555;
+  --hairline: #e6e6e6;
+  --max: 800px;
 }
 
 html,
@@ -23,11 +24,16 @@ body,
 body {
   margin: 0;
   /* Interface defaults to Inter */
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
   background: var(--bg);
-  color: var(--text);
+  color: var(--fg);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+::selection {
+  background: #000;
+  color: #fff;
 }
 
 .app-container {
@@ -45,23 +51,24 @@ body {
 }
 
 .home-content {
-  padding: 56px 24px 24px;
-  max-width: 800px;
+  padding: 40px 24px 24px;
+  max-width: var(--max);
   margin: 0 auto;
-  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  line-height: 1.7;
+  line-height: 1.8;
+  letter-spacing: 0.005em;
+  font-size: 17px;
 }
 
 .home-content h1 {
   margin: 0 0 12px;
-  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   font-weight: 600;
   letter-spacing: -0.01em;
+  font-size: 28px;
 }
 
 .intro-block {
   margin: 0 0 24px;
-  color: #333;
+  color: var(--muted);
   white-space: pre-wrap;
 }
 
@@ -73,33 +80,61 @@ body {
 
 .post-list li {
   margin: 0;
+  padding: 6px 0;
+}
+
+.post-list li+li {
+  border-top: 1px solid var(--hairline);
 }
 
 .post-link {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
+  display: block;
   padding: 6px 0;
   text-decoration: none;
   color: inherit;
+  line-height: 1.25;
+}
+
+.group:hover .group-underline {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 0.5px;
 }
 
 .post-link:hover {
-  background: #fafafa;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 0.5px;
 }
 
 .post-title {
   font-weight: 400;
+  font-size: 18px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  letter-spacing: -0.01em;
 }
 
 .post-meta {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 13px;
   white-space: nowrap;
+  margin-left: 8px;
+}
+
+@media (min-width: 768px) {
+  .post-list li {
+    padding: 4px 0;
+  }
+
+  .home-content {
+    padding: 0 0 24px;
+  }
+
+  .post-title {
+    font-size: 20px;
+  }
 }
 
 .new-post-link {
@@ -166,7 +201,7 @@ header h1 {
 .demo-controls button {
   background: #ffffff;
   border: 1px solid #d1d5db;
-  color: var(--text);
+  color: var(--fg);
   border-radius: 8px;
   padding: 8px 12px;
 }
@@ -184,13 +219,11 @@ header h1 {
 
 /* Editor typography: relaxed, readable */
 .editor-page .quill-editor .ProseMirror {
-  font-size: 17px;
-  /* comfortable body size */
-  line-height: 1.8;
-  /* relaxed line height */
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
+  font-size: 16px;
+  line-height: 1.75;
   letter-spacing: 0.005em;
-  /* subtle tracking for readability */
-  color: #111;
+  color: #000;
 }
 
 .editor-page .quill-editor .ProseMirror p {
@@ -204,27 +237,27 @@ header h1 {
 .editor-page .quill-editor .ProseMirror h4,
 .editor-page .quill-editor .ProseMirror h5,
 .editor-page .quill-editor .ProseMirror h6 {
-  font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  font-weight: 600;
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-weight: 500;
   line-height: 1.25;
   letter-spacing: -0.01em;
   margin: 1.6em 0 0.6em;
 }
 
 .editor-page .quill-editor .ProseMirror h1 {
-  font-size: 2.25rem;
-}
-
-.editor-page .quill-editor .ProseMirror h2 {
   font-size: 1.875rem;
 }
 
+.editor-page .quill-editor .ProseMirror h2 {
+  font-size: 1.125rem;
+}
+
 .editor-page .quill-editor .ProseMirror h3 {
-  font-size: 1.5rem;
+  font-size: 1rem;
 }
 
 .editor-page .quill-editor .ProseMirror h4 {
-  font-size: 1.25rem;
+  font-size: 1.125rem;
 }
 
 .editor-page .quill-editor .ProseMirror h5 {
@@ -235,19 +268,34 @@ header h1 {
   font-size: 1rem;
 }
 
+@media (min-width: 768px) {
+  .editor-page .quill-editor .ProseMirror h1 {
+    font-size: 2.25rem;
+  }
+
+  .editor-page .quill-editor .ProseMirror h2 {
+    font-size: 1.25rem;
+  }
+
+  .editor-page .quill-editor .ProseMirror h3 {
+    font-size: 1.125rem;
+  }
+}
+
 /* Links */
 .editor-page .quill-editor .ProseMirror a {
-  color: #2563eb;
+  color: inherit;
   text-decoration: underline;
-  text-underline-offset: 2px;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 0.5px;
 }
 
 /* Quotes */
 .editor-page .quill-editor .ProseMirror blockquote {
   margin: 1.2em 0;
   padding-left: 1em;
-  border-left: 3px solid #e5e7eb;
-  color: #374151;
+  border-left: 2px solid var(--hairline);
+  color: #222;
 }
 
 /* Lists */
@@ -265,7 +313,7 @@ header h1 {
 .editor-page .quill-editor .ProseMirror code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: 0.95em;
-  background: #f6f8fa;
+  background: #f7f7f7;
   padding: 0.12em 0.35em;
   border-radius: 4px;
 }
@@ -273,7 +321,7 @@ header h1 {
 .editor-page .quill-editor .ProseMirror pre code {
   display: block;
   padding: 12px;
-  border-radius: 8px;
+  border-radius: 6px;
   line-height: 1.6;
 }
 
@@ -293,8 +341,8 @@ header h1 {
   position: fixed;
   z-index: 1000;
   background: #ffffff;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
   padding: 4px 0;
   min-width: 120px;
 }
@@ -306,9 +354,8 @@ header h1 {
   background: none;
   border: none;
   text-align: left;
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   font-size: 14px;
-  color: #111111;
+  color: #000000;
   cursor: pointer;
   transition: background-color 0.1s ease;
 }
@@ -318,8 +365,7 @@ header h1 {
 }
 
 .context-menu-item.delete-item:hover {
-  background: #fef2f2;
-  color: #dc2626;
+  color: #000;
 }
 
 /* Confirmation Dialog */
@@ -329,7 +375,7 @@ header h1 {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(0, 0, 0, 0.3);
+  background: rgba(0, 0, 0, 0.25);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -338,18 +384,17 @@ header h1 {
 
 .dialog-content {
   background: #ffffff;
-  border-radius: 12px;
-  padding: 24px;
-  max-width: 400px;
-  width: 90%;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 20px;
+  max-width: 420px;
+  width: 92%;
 }
 
 .dialog-message {
   margin: 0 0 20px;
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   font-size: 16px;
-  color: #111111;
+  color: #000000;
   line-height: 1.5;
 }
 
@@ -361,8 +406,7 @@ header h1 {
 
 .dialog-button {
   padding: 10px 20px;
-  border-radius: 8px;
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  border-radius: 6px;
   font-size: 14px;
   font-weight: 500;
   cursor: pointer;
@@ -370,27 +414,23 @@ header h1 {
 }
 
 .confirm-button {
-  background: #111111;
+  background: #000000;
   color: #ffffff;
   border: none;
 }
 
 .confirm-button:hover {
-  background: #333333;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: #111111;
 }
 
 .cancel-button {
   background: #f5f5f5;
-  color: #111111;
-  border: none;
+  border: 1px solid var(--hairline);
+  color: #000000;
 }
 
 .cancel-button:hover {
-  background: #e5e5e5;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: #e9e9e9;
 }
 
 /* Login Page */
@@ -400,14 +440,13 @@ header h1 {
   align-items: center;
   justify-content: center;
   background: #ffffff;
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
 }
 
 .login-content {
   background: #ffffff;
-  padding: 48px;
-  border-radius: 12px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1);
+  padding: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--hairline);
   width: 100%;
   max-width: 400px;
 }
@@ -416,7 +455,7 @@ header h1 {
   margin: 0 0 32px;
   font-size: 24px;
   font-weight: 500;
-  color: #111111;
+  color: #000000;
   text-align: center;
 }
 
@@ -435,22 +474,21 @@ header h1 {
 .form-group label {
   font-size: 14px;
   font-weight: 500;
-  color: #374151;
+  color: #111111;
 }
 
 .form-group input {
   padding: 12px 16px;
-  border: 1px solid #d1d5db;
-  border-radius: 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
   font-size: 16px;
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   transition: border-color 0.1s ease, box-shadow 0.1s ease;
 }
 
 .form-group input:focus {
   outline: none;
-  border-color: #111111;
-  box-shadow: 0 0 0 3px rgba(17, 17, 17, 0.1);
+  border-color: #000000;
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.08);
 }
 
 .form-group input:disabled {
@@ -460,37 +498,34 @@ header h1 {
 
 .login-button {
   padding: 12px 24px;
-  background: #111111;
+  background: #000000;
   color: #ffffff;
   border: none;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 16px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.1s ease;
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
 }
 
 .login-button:hover:not(:disabled) {
-  background: #333333;
-  transform: translateY(-1px);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: #111111;
 }
 
 .login-button:disabled {
-  background: #9ca3af;
+  background: #aaaaaa;
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
 }
 
 .error-message {
-  background: #fef2f2;
-  color: #dc2626;
+  background: #f7f7f7;
+  color: #000000;
   padding: 12px 16px;
-  border-radius: 8px;
+  border-radius: 6px;
   font-size: 14px;
-  border: 1px solid #fecaca;
+  border: 1px solid var(--hairline);
 }
 
 /* Logout Button */
@@ -500,7 +535,7 @@ header h1 {
   right: 120px;
   background: transparent;
   border: none;
-  color: #111111;
+  color: #000000;
   font-weight: 400;
   cursor: pointer;
   text-decoration: none;
@@ -510,12 +545,18 @@ header h1 {
 /* Site Header */
 .site-header {
   width: 100%;
-  padding: 32px 0;
-  background: #ffffff;
+  padding: 16px 0;
+  background: rgba(255, 255, 255, 0.95);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid var(--hairline);
 }
 
 .site-header-content {
-  max-width: 800px;
+  max-width: var(--max);
   margin: 0 auto;
   padding: 0 24px;
   display: flex;
@@ -523,25 +564,33 @@ header h1 {
   justify-content: space-between;
 }
 
+@media (min-width: 768px) {
+  .site-header-content {
+    padding-left: 0;
+    padding-right: 0;
+  }
+}
+
 .site-title {
-  /* Sleek, not-too-thick display */
-  font-family: 'Outfit', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  font-size: 60px;
-  font-weight: 300;
-  /* Outfit Light */
+  font-size: 28px;
+  letter-spacing: 0.12em;
+  text-decoration: none;
   color: #000;
   margin: 0;
-  letter-spacing: -0.02em;
-  line-height: 1.08;
+  font-family: 'Outfit', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  font-weight: 300;
+}
+
+.site-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 0.5px;
 }
 
 .site-title.empty {
-  font-family: 'Outfit', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  font-size: 26px;
-  font-weight: 300;
-  /* Outfit Light */
-  color: #666666;
-  font-style: italic;
+  font-size: 15px;
+  color: #888888;
+  font-style: normal;
 }
 
 .header-actions {
@@ -550,22 +599,56 @@ header h1 {
   align-items: center;
 }
 
+.header-actions {
+  font-size: 13px;
+  color: #666;
+}
+
+.header-button {
+  color: inherit;
+  text-decoration: none;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+
+.header-button:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  text-decoration-thickness: 0.5px;
+  background: transparent;
+}
+
+.header-button.active {
+  color: #000;
+}
+
 /* Update page containers to account for header */
 .home-container {
   position: relative;
   min-height: 100vh;
   background: #ffffff;
-  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  font-weight: 400;
   padding-top: 0;
 }
 
 .home-content {
-  padding: 32px 24px 24px;
-  max-width: 800px;
+  padding: 0 24px 24px;
+  max-width: var(--max);
   margin: 0 auto;
-  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
-  line-height: 1.7;
+  line-height: 1.8;
+}
+
+.home-content .intro-text {
+  margin-top: 40px;
+  font-size: 16px;
+  /* font-weight: 300; */
+  letter-spacing: 0.01em;
+  color: #000;
+  font-family: 'Plus Jakarta Sans', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
+}
+
+.home-content h1 {
+  margin-top: 4px;
 }
 
 /* Posts page minimal title link in top-left */
@@ -574,7 +657,7 @@ header h1 {
   top: 16px;
   left: 24px;
   text-decoration: none;
-  color: #111111;
+  color: #000000;
   z-index: 1000;
 }
 
@@ -590,22 +673,19 @@ header h1 {
 
 /* Introduction text: use Plus Jakarta Sans at a subtle 420 weight */
 .intro-block {
-  font-weight: 450;
-  /* Ensure variable axis usage for browsers that respect it */
-  font-variation-settings: 'wght' 450;
+  font-weight: 400;
 }
 
 /* Move buttons to header actions */
 .header-button {
   background: transparent;
   border: none;
-  color: #111111;
+  color: #000000;
   font-weight: 400;
   cursor: pointer;
   text-decoration: none;
-  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   font-size: 14px;
-  padding: 8px 12px;
+  /* padding: 8px 12px; */
   border-radius: 6px;
   transition: background-color 0.1s ease;
 }
