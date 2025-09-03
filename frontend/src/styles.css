@@ -187,7 +187,7 @@ header h1 {
 
 /* Override textforge default font size */
 .editor-wrap .quill-editor .ProseMirror {
-  font-size: 18px !important;
+  font-size: 17px !important;
 }
 
 /* Unsaved indicator: black filled circle in top-right */
@@ -200,6 +200,8 @@ header h1 {
   background: #000;
   border-radius: 50%;
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9);
+  z-index: 1000;
+  pointer-events: none;
 }
 
 .back-link {
