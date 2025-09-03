@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, createContext, useContext } from 'react'
+import { useEffect, useMemo, useRef, useState, createContext, useContext } from 'react'
+import { Editor, type EditorRef, getPresetById } from 'textforge'
 import './styles.css'
 
 type Note = { id: number; title?: string; content?: string; createdAt?: string; updatedAt?: string }
@@ -535,15 +536,16 @@ function Home() {
             <ul className="post-list">
               {posts.map(p => (
                 <li key={p.id}>
-                  <div 
-                    className="post-link"
+                  <a 
+                    href={`/posts/${p.id}`} 
+                    className="post-link group"
                     onContextMenu={(e) => handleRightClick(e, p.id)}
                   >
-                    <span className="post-title">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
+                    <span className="post-title group-underline">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
                     {p.updatedAt && (
                       <span className="post-meta">— {new Date(p.updatedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
                     )}
-                  </div>
+                  </a>
                 </li>
               ))}
             </ul>
@@ -794,11 +796,142 @@ function Settings() {
   )
 }
 
+function PostEditor({ id }: { id: string }) {
+  const { isAuthenticated, token, logout } = useAuth()
+  const [content, setContent] = useState<string>('')
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string|undefined>()
+  const [dirty, setDirty] = useState(false)
+  const [siteTitle, setSiteTitle] = useState<string>('')
+  const editorRef = useRef<EditorRef>(null)
+  const latestContentRef = useRef<string>('')
+
+  const handleImageUpload = async (file: File): Promise<string> => {
+    if (!token) {
+      throw new Error('Not authenticated')
+    }
+
+    const formData = new FormData()
+    formData.append('file', file)
+
+    const response = await fetch('/api/uploads', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      body: formData
+    })
+
+    if (!response.ok) {
+      const errorText = await response.text()
+      throw new Error(`Upload failed: ${errorText}`)
+    }
+
+    const data = await response.json()
+    return data.url
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch(`/api/posts/${id}`)
+        if (!res.ok) throw new Error(`Failed to load note: ${res.status}`)
+        const note = await res.json()
+        if (!cancelled) {
+          setContent(note.content || '')
+          latestContentRef.current = note.content || ''
+          setDirty(false)
+        }
+      } catch (e: any) {
+        console.error(e)
+        if (!cancelled) setError(e?.message || 'Failed to load note')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+    load()
+    return () => { cancelled = true }
+  }, [id])
+
+  useEffect(() => {
+    // Load site title
+    const loadSettings = async () => {
+      try {
+        const res = await fetch('/api/settings')
+        if (res.ok) {
+          const data = await res.json()
+          setSiteTitle(data.siteTitle || '')
+        }
+      } catch (e) {
+        console.error('Failed to load settings:', e)
+      }
+    }
+    loadSettings()
+  }, [])
+
+  if (loading) return <div className="app-container"><p>Loading…</p></div>
+  if (error) return <div className="app-container"><p>{error}</p></div>
+
+  return (
+    <>
+      <Header 
+        siteTitle={siteTitle}
+        isAuthenticated={isAuthenticated}
+        onLogout={logout}
+        onSettings={() => window.location.assign('/settings')}
+      />
+      {dirty && <div className="unsaved-indicator" aria-label="Unsaved changes" />}
+      <div className="app-container editor-page">
+        <main>
+          <div className="editor-wrap">
+            <Editor
+              ref={editorRef}
+              content={content}
+              editable={isAuthenticated}
+              onChange={isAuthenticated ? (html) => {
+                setContent(html)
+                latestContentRef.current = html
+                setDirty(true)
+              } : undefined}
+              onImageUpload={isAuthenticated ? handleImageUpload : undefined}
+              onAutoSave={isAuthenticated ? async (html) => {
+                try {
+                  const res = await fetch(`/api/posts/${id}`, {
+                    method: 'PUT',
+                    headers: { 
+                      'Content-Type': 'application/json',
+                      ...(token ? { Authorization: `Bearer ${token}` } : {})
+                    },
+                    body: JSON.stringify({ content: html })
+                  })
+                  if (!res.ok) throw new Error(`Failed to save note: ${res.status}`)
+                  // Only clear dirty if content hasn't changed since this save started
+                  if (latestContentRef.current === html) {
+                    setDirty(false)
+                  }
+                } catch (e) {
+                  console.error(e)
+                  // keep dirty = true so the dot stays visible
+                }
+              } : undefined}
+            />
+          </div>
+        </main>
+      </div>
+    </>
+  )
+}
+
 function AppContent() {
   const [needsSetup, setNeedsSetup] = useState<boolean | null>(null)
   const [setupLoading, setSetupLoading] = useState(true)
 
   const path = typeof window !== 'undefined' ? window.location.pathname : '/'
+  const match = useMemo(() => {
+    const m = path.match(/^\/posts\/([A-Za-z0-9_-]+)$/)
+    return m?.[1]
+  }, [path])
 
   useEffect(() => {
     // Check if setup is needed on app start
@@ -841,6 +974,9 @@ function AppContent() {
   if (path === '/admin') {
     return <Login />
   }
+  if (match) {
+    return <PostEditor id={match} />
+  }
   if (path === '/archive') {
     return <Archive />
   }
@@ -851,6 +987,16 @@ function AppContent() {
 }
 
 export default function App() {
+  useEffect(() => {
+    // Set default typography preset for textforge
+    const preset = getPresetById('figtree-manrope') || getPresetById('figtree-epilogue')
+    if (preset) {
+      const root = document.documentElement
+      root.style.setProperty('--font-body', preset.body)
+      root.style.setProperty('--font-heading', preset.heading)
+    }
+  }, [])
+
   return (
     <AuthProvider>
       <AppContent />
@@ -918,12 +1064,12 @@ function Archive() {
             <ul className="post-list">
               {posts.map(p => (
                 <li key={p.id}>
-                  <div className="post-link">
+                  <a href={`/posts/${p.id}`} className="post-link">
                     <span className="post-title">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
                     {p.updatedAt && (
                       <span className="post-meta">— {new Date(p.updatedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
                     )}
-                  </div>
+                  </a>
                 </li>
               ))}
             </ul>
