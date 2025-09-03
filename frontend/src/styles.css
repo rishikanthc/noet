@@ -1,4 +1,4 @@
-@import '@quill/editor-styles.css';
+@import '../node_modules/textforge/dist/textforge.css';
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,300;0,400;0,500;0,600;1,400&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap');
@@ -218,7 +218,7 @@ header h1 {
 }
 
 /* Editor typography: relaxed, readable */
-.editor-page .quill-editor .ProseMirror {
+.editor-page .textforge-editor .ProseMirror {
   font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, 'Apple Color Emoji', 'Segoe UI Emoji';
   font-size: 16px;
   line-height: 1.75;
@@ -226,17 +226,17 @@ header h1 {
   color: #000;
 }
 
-.editor-page .quill-editor .ProseMirror p {
+.editor-page .textforge-editor .ProseMirror p {
   margin: 0 0 0.9em;
 }
 
 /* Headings use Space Grotesk on post page */
-.editor-page .quill-editor .ProseMirror h1,
-.editor-page .quill-editor .ProseMirror h2,
-.editor-page .quill-editor .ProseMirror h3,
-.editor-page .quill-editor .ProseMirror h4,
-.editor-page .quill-editor .ProseMirror h5,
-.editor-page .quill-editor .ProseMirror h6 {
+.editor-page .textforge-editor .ProseMirror h1,
+.editor-page .textforge-editor .ProseMirror h2,
+.editor-page .textforge-editor .ProseMirror h3,
+.editor-page .textforge-editor .ProseMirror h4,
+.editor-page .textforge-editor .ProseMirror h5,
+.editor-page .textforge-editor .ProseMirror h6 {
   font-family: 'Space Grotesk', ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial;
   font-weight: 500;
   line-height: 1.25;
@@ -244,46 +244,46 @@ header h1 {
   margin: 1.6em 0 0.6em;
 }
 
-.editor-page .quill-editor .ProseMirror h1 {
+.editor-page .textforge-editor .ProseMirror h1 {
   font-size: 1.875rem;
 }
 
-.editor-page .quill-editor .ProseMirror h2 {
+.editor-page .textforge-editor .ProseMirror h2 {
   font-size: 1.125rem;
 }
 
-.editor-page .quill-editor .ProseMirror h3 {
+.editor-page .textforge-editor .ProseMirror h3 {
   font-size: 1rem;
 }
 
-.editor-page .quill-editor .ProseMirror h4 {
+.editor-page .textforge-editor .ProseMirror h4 {
   font-size: 1.125rem;
 }
 
-.editor-page .quill-editor .ProseMirror h5 {
+.editor-page .textforge-editor .ProseMirror h5 {
   font-size: 1.125rem;
 }
 
-.editor-page .quill-editor .ProseMirror h6 {
+.editor-page .textforge-editor .ProseMirror h6 {
   font-size: 1rem;
 }
 
 @media (min-width: 768px) {
-  .editor-page .quill-editor .ProseMirror h1 {
+  .editor-page .textforge-editor .ProseMirror h1 {
     font-size: 2.25rem;
   }
 
-  .editor-page .quill-editor .ProseMirror h2 {
+  .editor-page .textforge-editor .ProseMirror h2 {
     font-size: 1.25rem;
   }
 
-  .editor-page .quill-editor .ProseMirror h3 {
+  .editor-page .textforge-editor .ProseMirror h3 {
     font-size: 1.125rem;
   }
 }
 
 /* Links */
-.editor-page .quill-editor .ProseMirror a {
+.editor-page .textforge-editor .ProseMirror a {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -291,7 +291,7 @@ header h1 {
 }
 
 /* Quotes */
-.editor-page .quill-editor .ProseMirror blockquote {
+.editor-page .textforge-editor .ProseMirror blockquote {
   margin: 1.2em 0;
   padding-left: 1em;
   border-left: 2px solid var(--hairline);
@@ -299,18 +299,18 @@ header h1 {
 }
 
 /* Lists */
-.editor-page .quill-editor .ProseMirror ul,
-.editor-page .quill-editor .ProseMirror ol {
+.editor-page .textforge-editor .ProseMirror ul,
+.editor-page .textforge-editor .ProseMirror ol {
   padding-left: 1.25em;
   margin: 0.6em 0 0.9em;
 }
 
-.editor-page .quill-editor .ProseMirror li {
+.editor-page .textforge-editor .ProseMirror li {
   margin: 0.3em 0;
 }
 
 /* Code */
-.editor-page .quill-editor .ProseMirror code {
+.editor-page .textforge-editor .ProseMirror code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
   font-size: 0.95em;
   background: #f7f7f7;
@@ -318,7 +318,7 @@ header h1 {
   border-radius: 4px;
 }
 
-.editor-page .quill-editor .ProseMirror pre code {
+.editor-page .textforge-editor .ProseMirror pre code {
   display: block;
   padding: 12px;
   border-radius: 6px;

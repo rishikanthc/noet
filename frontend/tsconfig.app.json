@@ -12,10 +12,7 @@
     "jsx": "react-jsx",
     "strict": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
-    "paths": {
-      "@quill/*": ["../../quill/src/*"]
-    }
+    "baseUrl": "."
   },
   "include": ["src"]
 }

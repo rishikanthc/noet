@@ -2,15 +2,10 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 
-// Build to the Go backend static dir and allow importing from ../../quill
+// Build to the Go backend static dir
 export default defineConfig({
   plugins: [react()],
   cacheDir: resolve(__dirname, '.vite'),
-  resolve: {
-    alias: {
-      '@quill': resolve(__dirname, '../../quill/src'),
-    },
-  },
   build: {
     outDir: resolve(__dirname, '../backend/static'),
     emptyOutDir: true

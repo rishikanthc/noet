@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, createContext, useContext } from 'react'
-import Editor, { type EditorRef } from '@quill/Editor'
+import { Editor, type EditorRef } from 'textforge'
 import './styles.css'
 
 type Note = { id: number; title?: string; content?: string; createdAt?: string; updatedAt?: string }
