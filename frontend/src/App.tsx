@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState, createContext, useContext } from 'react'
-import { Editor, type EditorRef } from 'textforge'
+import { useEffect, useMemo, useState, createContext, useContext } from 'react'
 import './styles.css'
 
 type Note = { id: number; title?: string; content?: string; createdAt?: string; updatedAt?: string }
@@ -268,16 +267,11 @@ function Login() {
   )
 }
 
-function Header({ siteTitle, isAuthenticated, onLogout, onNewPost, onSettings, creating, showBack, onBack, latestPostId }: {
+function Header({ siteTitle, isAuthenticated, onLogout, onSettings }: {
   siteTitle: string
   isAuthenticated: boolean
   onLogout: () => void
-  onNewPost: () => void
   onSettings: () => void
-  creating: boolean
-  showBack?: boolean
-  onBack?: () => void
-  latestPostId?: number
 }) {
   const path = typeof window !== 'undefined' ? window.location.pathname : '/'
   return (
@@ -288,21 +282,12 @@ function Header({ siteTitle, isAuthenticated, onLogout, onNewPost, onSettings, c
         </a>
         <div className="header-actions" role="navigation" aria-label="Primary">
           <a className={`header-button ${path === '/' ? 'active' : ''}`} href="/">Home</a>
-          <a className={`header-button ${/^\/posts\//.test(path) ? 'active' : ''}`} href={latestPostId ? `/posts/${latestPostId}` : '/'}>Post</a>
           <a className={`header-button ${path === '/archive' ? 'active' : ''}`} href="/archive">Archive</a>
           <a className="header-button" href="/rss.xml">RSS</a>
-          {showBack && onBack && (
-            <button className="header-button" onClick={onBack}>
-              ← Back
-            </button>
-          )}
           {isAuthenticated && (
             <>
               <button className="header-button" onClick={onSettings}>
                 Settings
-              </button>
-              <button className="header-button" onClick={onNewPost} disabled={creating}>
-                {creating ? 'Creating...' : 'New Post'}
               </button>
               <button className="header-button" onClick={onLogout}>
                 Logout
@@ -376,7 +361,6 @@ function ConfirmDialog({ message, onConfirm, onCancel }: { message: string; onCo
 
 function Home() {
   const { isAuthenticated, logout, token } = useAuth()
-  const [creating, setCreating] = useState(false)
   const [posts, setPosts] = useState<Note[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | undefined>()
@@ -389,11 +373,10 @@ function Home() {
     const onKey = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase()
       if (k === 'h') window.location.assign('/')
-      if (k === 'p' && posts[0]?.id != null) window.location.assign(`/posts/${posts[0].id}`)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [posts])
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -498,24 +481,6 @@ function Home() {
     loadSettings()
   }, [])
 
-  const handleNewPost = async () => {
-    if (creating || !isAuthenticated) return
-    setCreating(true)
-    try {
-      const res = await fetch('/api/posts', { 
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      })
-      if (!res.ok) throw new Error(`Failed to create note: ${res.status}`)
-      const note = await res.json()
-      window.location.assign(`/posts/${note.id}`)
-    } catch (e) {
-      console.error(e)
-      alert('Failed to create a new post')
-    } finally {
-      setCreating(false)
-    }
-  }
 
   const handleDeletePost = async (postId: number) => {
     if (!isAuthenticated || !token) return
@@ -556,10 +521,7 @@ function Home() {
         siteTitle={siteTitle}
         isAuthenticated={isAuthenticated}
         onLogout={logout}
-        onNewPost={handleNewPost}
         onSettings={() => window.location.assign('/settings')}
-        creating={creating}
-        latestPostId={posts[0]?.id}
       />
       <div className="home-content">
         <p className="intro-text">{(intro && intro.trim()) ? intro : 'A text‑only blog about design, systems, and quiet craft.'}</p>
@@ -568,21 +530,20 @@ function Home() {
         {error && <p>{error}</p>}
         {!loading && !error && (
           posts.length === 0 ? (
-            <p>No posts yet. Click “New Post”.</p>
+            <p>No posts yet.</p>
           ) : (
             <ul className="post-list">
               {posts.map(p => (
                 <li key={p.id}>
-                  <a 
-                    href={`/posts/${p.id}`} 
-                    className="post-link group"
+                  <div 
+                    className="post-link"
                     onContextMenu={(e) => handleRightClick(e, p.id)}
                   >
-                    <span className="post-title group-underline">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
+                    <span className="post-title">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
                     {p.updatedAt && (
                       <span className="post-meta">— {new Date(p.updatedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
                     )}
-                  </a>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -619,151 +580,6 @@ function Home() {
   )
 }
 
-function PostEditor({ id }: { id: string }) {
-  const { isAuthenticated, token, logout } = useAuth()
-  const [content, setContent] = useState<string>('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string|undefined>()
-  const [dirty, setDirty] = useState(false)
-  const [siteTitle, setSiteTitle] = useState<string>('')
-  const editorRef = useRef<EditorRef>(null)
-  const latestContentRef = useRef<string>('')
-
-  const handleImageUpload = async (file: File): Promise<string> => {
-    if (!token) {
-      throw new Error('Not authenticated')
-    }
-
-    const formData = new FormData()
-    formData.append('file', file)
-
-    const response = await fetch('/api/uploads', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
-      body: formData
-    })
-
-    if (!response.ok) {
-      const errorText = await response.text()
-      throw new Error(`Upload failed: ${errorText}`)
-    }
-
-    const data = await response.json()
-    return data.url
-  }
-
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/posts/${id}`)
-        if (!res.ok) throw new Error(`Failed to load note: ${res.status}`)
-        const note = await res.json()
-        if (!cancelled) {
-          setContent(note.content || '')
-          latestContentRef.current = note.content || ''
-          setDirty(false)
-        }
-      } catch (e: any) {
-        console.error(e)
-        if (!cancelled) setError(e?.message || 'Failed to load note')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [id])
-
-  useEffect(() => {
-    // Load site title
-    const loadSettings = async () => {
-      try {
-        const res = await fetch('/api/settings')
-        if (res.ok) {
-          const data = await res.json()
-          setSiteTitle(data.siteTitle || '')
-        }
-      } catch (e) {
-        console.error('Failed to load settings:', e)
-      }
-    }
-    loadSettings()
-  }, [])
-
-  const handleNewPost = async () => {
-    if (!isAuthenticated) return
-    try {
-      const res = await fetch('/api/posts', { 
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      })
-      if (!res.ok) throw new Error(`Failed to create note: ${res.status}`)
-      const note = await res.json()
-      window.location.assign(`/posts/${note.id}`)
-    } catch (e) {
-      console.error(e)
-      alert('Failed to create a new post')
-    }
-  }
-
-  if (loading) return <div className="app-container"><p>Loading…</p></div>
-  if (error) return <div className="app-container"><p>{error}</p></div>
-
-  return (
-    <>
-      <Header 
-        siteTitle={siteTitle}
-        isAuthenticated={isAuthenticated}
-        onLogout={logout}
-        onNewPost={handleNewPost}
-        onSettings={() => window.location.assign('/settings')}
-        creating={false}
-        latestPostId={parseInt(id, 10)}
-      />
-      {dirty && <div className="unsaved-indicator" aria-label="Unsaved changes" />}
-      <div className="app-container editor-page">
-        <main>
-          <div className="editor-wrap">
-          <Editor
-            ref={editorRef}
-            content={content}
-            editable={isAuthenticated}
-            onChange={isAuthenticated ? (html) => {
-              setContent(html)
-              latestContentRef.current = html
-              setDirty(true)
-            } : undefined}
-            onImageUpload={isAuthenticated ? handleImageUpload : undefined}
-            onAutoSave={isAuthenticated ? async (html) => {
-              try {
-                const res = await fetch(`/api/posts/${id}`, {
-                  method: 'PUT',
-                  headers: { 
-                    'Content-Type': 'application/json',
-                    ...(token ? { Authorization: `Bearer ${token}` } : {})
-                  },
-                  body: JSON.stringify({ content: html })
-                })
-                if (!res.ok) throw new Error(`Failed to save note: ${res.status}`)
-                // Only clear dirty if content hasn't changed since this save started
-                if (latestContentRef.current === html) {
-                  setDirty(false)
-                }
-              } catch (e) {
-                console.error(e)
-                // keep dirty = true so the dot stays visible
-              }
-            } : undefined}
-          />
-          </div>
-        </main>
-      </div>
-    </>
-  )
-}
 
 function Settings() {
   const { isAuthenticated, token, logout } = useAuth()
@@ -853,21 +669,6 @@ function Settings() {
     }
   }
 
-  const handleNewPost = async () => {
-    if (!isAuthenticated) return
-    try {
-      const res = await fetch('/api/posts', { 
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {}
-      })
-      if (!res.ok) throw new Error(`Failed to create note: ${res.status}`)
-      const note = await res.json()
-      window.location.assign(`/posts/${note.id}`)
-    } catch (e) {
-      console.error(e)
-      alert('Failed to create a new post')
-    }
-  }
 
   if (!isAuthenticated) {
     return (
@@ -876,9 +677,7 @@ function Settings() {
           siteTitle={siteTitle}
           isAuthenticated={false}
           onLogout={logout}
-          onNewPost={handleNewPost}
           onSettings={() => {}}
-          creating={false}
         />
         <div className="app-container settings-page">
           <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
@@ -897,9 +696,7 @@ function Settings() {
           siteTitle={siteTitle}
           isAuthenticated={isAuthenticated}
           onLogout={logout}
-          onNewPost={handleNewPost}
           onSettings={() => {}}
-          creating={false}
         />
         <div className="app-container settings-page">
           <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
@@ -916,10 +713,7 @@ function Settings() {
         siteTitle={siteTitle}
         isAuthenticated={isAuthenticated}
         onLogout={logout}
-        onNewPost={handleNewPost}
         onSettings={() => {}}
-        creating={false}
-        latestPostId={undefined}
       />
       <div className="app-container settings-page">
         <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
@@ -1005,10 +799,6 @@ function AppContent() {
   const [setupLoading, setSetupLoading] = useState(true)
 
   const path = typeof window !== 'undefined' ? window.location.pathname : '/'
-  const match = useMemo(() => {
-    const m = path.match(/^\/posts\/([A-Za-z0-9_-]+)$/)
-    return m?.[1]
-  }, [path])
 
   useEffect(() => {
     // Check if setup is needed on app start
@@ -1050,9 +840,6 @@ function AppContent() {
   // Normal app routing
   if (path === '/admin') {
     return <Login />
-  }
-  if (match) {
-    return <PostEditor id={match} />
   }
   if (path === '/archive') {
     return <Archive />
@@ -1118,9 +905,7 @@ function Archive() {
         siteTitle={siteTitle}
         isAuthenticated={isAuthenticated}
         onLogout={logout}
-        onNewPost={() => {}}
         onSettings={() => window.location.assign('/settings')}
-        creating={false}
       />
       <div className="home-content">
         <h1>Archive</h1>
@@ -1133,12 +918,12 @@ function Archive() {
             <ul className="post-list">
               {posts.map(p => (
                 <li key={p.id}>
-                  <a href={`/posts/${p.id}`} className="post-link">
+                  <div className="post-link">
                     <span className="post-title">{p.title && p.title.trim() ? p.title : 'Untitled'}</span>
                     {p.updatedAt && (
                       <span className="post-meta">— {new Date(p.updatedAt).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>
                     )}
-                  </a>
+                  </div>
                 </li>
               ))}
             </ul>
