@@ -713,7 +713,7 @@ function PostEditor({ id }: { id: string }) {
   if (error) return <div className="app-container"><p>{error}</p></div>
 
   return (
-    <div className="app-container editor-page">
+    <>
       <Header 
         siteTitle={siteTitle}
         isAuthenticated={isAuthenticated}
@@ -724,8 +724,9 @@ function PostEditor({ id }: { id: string }) {
         latestPostId={parseInt(id, 10)}
       />
       {dirty && <div className="unsaved-indicator" aria-label="Unsaved changes" />}
-      <main>
-        <div className="editor-wrap">
+      <div className="app-container editor-page">
+        <main>
+          <div className="editor-wrap">
           <Editor
             ref={editorRef}
             content={content}
@@ -757,9 +758,10 @@ function PostEditor({ id }: { id: string }) {
               }
             } : undefined}
           />
-        </div>
-      </main>
-    </div>
+          </div>
+        </main>
+      </div>
+    </>
   )
 }
 
@@ -869,7 +871,7 @@ function Settings() {
 
   if (!isAuthenticated) {
     return (
-      <div className="app-container settings-page">
+      <>
         <Header 
           siteTitle={siteTitle}
           isAuthenticated={false}
@@ -878,17 +880,19 @@ function Settings() {
           onSettings={() => {}}
           creating={false}
         />
-        <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
-          <p>Access denied. Please log in to access settings.</p>
-          <button onClick={() => window.location.assign('/admin')}>Go to Login</button>
-        </main>
-      </div>
+        <div className="app-container settings-page">
+          <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
+            <p>Access denied. Please log in to access settings.</p>
+            <button onClick={() => window.location.assign('/admin')}>Go to Login</button>
+          </main>
+        </div>
+      </>
     )
   }
 
   if (loading) {
     return (
-      <div className="app-container settings-page">
+      <>
         <Header 
           siteTitle={siteTitle}
           isAuthenticated={isAuthenticated}
@@ -897,15 +901,17 @@ function Settings() {
           onSettings={() => {}}
           creating={false}
         />
-        <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
-          <p>Loading settings...</p>
-        </main>
-      </div>
+        <div className="app-container settings-page">
+          <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
+            <p>Loading settings...</p>
+          </main>
+        </div>
+      </>
     )
   }
 
   return (
-    <div className="app-container settings-page">
+    <>
       <Header 
         siteTitle={siteTitle}
         isAuthenticated={isAuthenticated}
@@ -915,7 +921,8 @@ function Settings() {
         creating={false}
         latestPostId={undefined}
       />
-      <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
+      <div className="app-container settings-page">
+        <main style={{ maxWidth: 800, margin: '0 auto', padding: '32px 24px' }}>
         <h1 style={{ fontWeight: 400, fontFamily: 'Inter, sans-serif' }}>Settings</h1>
         
         <div style={{ marginBottom: '24px' }}>
@@ -987,8 +994,9 @@ function Settings() {
             Cancel
           </button>
         </div>
-      </main>
-    </div>
+        </main>
+      </div>
+    </>
   )
 }
 
