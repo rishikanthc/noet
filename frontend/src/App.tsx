@@ -700,23 +700,25 @@ function Home() {
 				creating={creating}
 			/>
 			<div className="home-content">
-				{heroImage && (
-					<img
-						src={heroImage}
-						alt="Hero image"
-						style={{
-							width: "150px",
-							height: "auto",
-							marginBottom: "16px",
-							borderRadius: "6px",
-						}}
-					/>
-				)}
-				<p className="intro-text">
-					{intro && intro.trim()
-						? intro
-						: "A text‑only blog about design, systems, and quiet craft."}
-				</p>
+				<div style={{ display: "flex", alignItems: "flex-start", gap: "12px", marginBottom: "24px" }}>
+					{heroImage && (
+						<img
+							src={heroImage}
+							alt="Hero image"
+							style={{
+								width: "150px",
+								height: "auto",
+								borderRadius: "6px",
+								flexShrink: 0,
+							}}
+						/>
+					)}
+					<p className="intro-text" style={{ margin: 0, flex: 1 }}>
+						{intro && intro.trim()
+							? intro
+							: "A text‑only blog about design, systems, and quiet craft."}
+					</p>
+				</div>
 				<h1>Latest</h1>
 				{loading && <p>Loading…</p>}
 				{error && <p>{error}</p>}

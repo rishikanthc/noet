@@ -52,7 +52,7 @@ body {
 }
 
 .home-content {
-  padding: 40px 24px 24px;
+  padding: 64px 24px 24px;
   max-width: var(--max);
   margin: 0 auto;
   line-height: 1.8;
@@ -130,7 +130,7 @@ body {
   }
 
   .home-content {
-    padding: 0 0 24px;
+    padding: 64px 0 24px;
   }
 
   .post-title {
@@ -511,7 +511,7 @@ header h1 {
 }
 
 .home-content {
-  padding: 0 24px 24px;
+  padding: 64px 24px 24px;
   max-width: var(--max);
   margin: 0 auto;
   line-height: 1.8;
