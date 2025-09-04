@@ -381,6 +381,7 @@ function Header({
 	onSettings,
 	onNewPost,
 	creating,
+	aboutEnabled,
 }: {
 	siteTitle: string;
 	isAuthenticated: boolean;
@@ -388,6 +389,7 @@ function Header({
 	onSettings: () => void;
 	onNewPost?: () => void;
 	creating?: boolean;
+	aboutEnabled?: boolean;
 }) {
 	const path = typeof window !== "undefined" ? window.location.pathname : "/";
 	return (
@@ -409,6 +411,14 @@ function Header({
 					>
 						Archive
 					</a>
+					{aboutEnabled && (
+						<a
+							className={`header-button ${path === "/about" ? "active" : ""}`}
+							href="/about"
+						>
+							About Me
+						</a>
+					)}
 					<a className="header-button" href="/rss.xml">
 						RSS
 					</a>
@@ -513,6 +523,7 @@ function Home() {
 	const [intro, setIntro] = useState<string>("");
 	const [siteTitle, setSiteTitle] = useState<string>("");
 	const [heroImage, setHeroImage] = useState<string>("");
+	const [aboutEnabled, setAboutEnabled] = useState<boolean>(false);
 	const [creating, setCreating] = useState(false);
 	const [contextMenu, setContextMenu] = useState<{
 		x: number;
@@ -629,6 +640,7 @@ function Home() {
 					setIntro(data.introText || "");
 					setSiteTitle(data.siteTitle || "");
 					setHeroImage(data.heroImage || "");
+					setAboutEnabled(data.aboutEnabled === "true");
 				}
 			} catch (e) {
 				console.error("Failed to load settings:", e);
@@ -698,9 +710,10 @@ function Home() {
 				onSettings={() => window.location.assign("/settings")}
 				onNewPost={handleNewPost}
 				creating={creating}
+				aboutEnabled={aboutEnabled}
 			/>
 			<div className="home-content">
-				<div style={{ display: "flex", alignItems: "flex-start", gap: "12px", marginBottom: "24px" }}>
+				<div style={{ display: "flex", alignItems: "flex-start", gap: "12px", marginBottom: "48px" }}>
 					{heroImage && (
 						<img
 							src={heroImage}
@@ -792,6 +805,7 @@ function Settings() {
 	const [introText, setIntroText] = useState<string>("");
 	const [siteTitle, setSiteTitle] = useState<string>("");
 	const [heroImage, setHeroImage] = useState<string>("");
+	const [aboutEnabled, setAboutEnabled] = useState<boolean>(false);
 	const [uploading, setUploading] = useState(false);
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
@@ -806,6 +820,7 @@ function Settings() {
 					setIntroText(data.introText || "");
 					setSiteTitle(data.siteTitle || "");
 					setHeroImage(data.heroImage || "");
+					setAboutEnabled(data.aboutEnabled === "true");
 				}
 			} catch (e) {
 				console.error("Failed to load settings:", e);
@@ -921,6 +936,28 @@ function Settings() {
 				const heroResult = await heroRes.json();
 				console.log("Hero image saved successfully:", heroResult);
 			}
+
+			// Save about enabled setting
+			console.log("Saving about enabled setting...");
+			const aboutRes = await fetch("/api/settings", {
+				method: "PUT",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify({ key: "aboutEnabled", value: aboutEnabled.toString() }),
+			});
+
+			if (!aboutRes.ok) {
+				const errorText = await aboutRes.text();
+				console.error("Failed to save about enabled:", aboutRes.status, errorText);
+				throw new Error(
+					`Failed to save about enabled: ${aboutRes.status} - ${errorText}`,
+				);
+			}
+
+			const aboutResult = await aboutRes.json();
+			console.log("About enabled saved successfully:", aboutResult);
 
 			console.log("All settings saved successfully, redirecting...");
 			window.location.assign("/");
@@ -1112,6 +1149,24 @@ function Settings() {
 							placeholder="Write a short introduction to show on the homepage"
 							disabled={saving}
 						/>
+					</div>
+
+					<div style={{ marginBottom: "24px" }}>
+						<label
+							style={{ display: "block", margin: "12px 0 6px", color: "#444" }}
+						>
+							<input
+								type="checkbox"
+								checked={aboutEnabled}
+								onChange={(e) => setAboutEnabled(e.target.checked)}
+								disabled={saving}
+								style={{ marginRight: "8px" }}
+							/>
+							Enable "About Me" page
+						</label>
+						<div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>
+							When enabled, an "About Me" link will appear in the header navigation
+						</div>
 					</div>
 
 					<div style={{ marginTop: 20, display: "flex", gap: 8 }}>
@@ -1380,10 +1435,188 @@ function AppContent() {
 	if (path === "/archive") {
 		return <Archive />;
 	}
+	if (path === "/about") {
+		return <AboutMe />;
+	}
 	if (path === "/settings") {
 		return <Settings />;
 	}
 	return <Home />;
+}
+
+function AboutMe() {
+	const { isAuthenticated, token, logout } = useAuth();
+	const [content, setContent] = useState<string>("");
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | undefined>();
+	const [dirty, setDirty] = useState(false);
+	const [siteTitle, setSiteTitle] = useState<string>("");
+	const [aboutEnabled, setAboutEnabled] = useState<boolean>(false);
+	const editorRef = useRef<EditorRef>(null);
+	const latestContentRef = useRef<string>("");
+
+	const handleImageUpload = async (file: File): Promise<string> => {
+		if (!token) {
+			throw new Error("Not authenticated");
+		}
+
+		const formData = new FormData();
+		formData.append("file", file);
+
+		const response = await fetch("/api/uploads", {
+			method: "POST",
+			headers: {
+				Authorization: `Bearer ${token}`,
+			},
+			body: formData,
+		});
+
+		if (!response.ok) {
+			const errorText = await response.text();
+			throw new Error(`Upload failed: ${errorText}`);
+		}
+
+		const data = await response.json();
+		return data.url;
+	};
+
+	useEffect(() => {
+		let cancelled = false;
+		const load = async () => {
+			try {
+				const res = await fetch(`/api/about`);
+				if (!res.ok) throw new Error(`Failed to load about me: ${res.status}`);
+				const data = await res.json();
+				if (!cancelled) {
+					setContent(data.content || "");
+					latestContentRef.current = data.content || "";
+					setDirty(false);
+				}
+			} catch (e: any) {
+				console.error(e);
+				if (!cancelled) setError(e?.message || "Failed to load about me");
+			} finally {
+				if (!cancelled) setLoading(false);
+			}
+		};
+		load();
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	useEffect(() => {
+		// Load site settings
+		const loadSettings = async () => {
+			try {
+				const res = await fetch("/api/settings");
+				if (res.ok) {
+					const data = await res.json();
+					setSiteTitle(data.siteTitle || "");
+					setAboutEnabled(data.aboutEnabled === "true");
+				}
+			} catch (e) {
+				console.error("Failed to load settings:", e);
+			}
+		};
+		loadSettings();
+	}, []);
+
+	// If About Me is disabled, show 404-like page
+	if (!loading && !aboutEnabled) {
+		return (
+			<div className="home-container">
+				<Header
+					siteTitle={siteTitle}
+					isAuthenticated={isAuthenticated}
+					onLogout={logout}
+					onSettings={() => window.location.assign("/settings")}
+					aboutEnabled={aboutEnabled}
+				/>
+				<div className="home-content">
+					<h1>Page Not Found</h1>
+					<p>The page you're looking for doesn't exist.</p>
+					<a href="/">← Go back home</a>
+				</div>
+			</div>
+		);
+	}
+
+	if (loading)
+		return (
+			<div className="app-container">
+				<p>Loading…</p>
+			</div>
+		);
+	if (error)
+		return (
+			<div className="app-container">
+				<p>{error}</p>
+			</div>
+		);
+
+	return (
+		<>
+			<Header
+				siteTitle={siteTitle}
+				isAuthenticated={isAuthenticated}
+				onLogout={logout}
+				onSettings={() => window.location.assign("/settings")}
+				aboutEnabled={aboutEnabled}
+			/>
+			{dirty && (
+				<div className="unsaved-indicator" aria-label="Unsaved changes" />
+			)}
+			<div className="app-container editor-page">
+				<main>
+					<div className="editor-wrap">
+						<Editor
+							ref={editorRef}
+							content={content}
+							editable={isAuthenticated}
+							onChange={
+								isAuthenticated
+									? (html) => {
+											setContent(html);
+											latestContentRef.current = html;
+											setDirty(true);
+										}
+									: undefined
+							}
+							onImageUpload={isAuthenticated ? handleImageUpload : undefined}
+							onAutoSave={
+								isAuthenticated
+									? async (html) => {
+											try {
+												const res = await fetch(`/api/about`, {
+													method: "PUT",
+													headers: {
+														"Content-Type": "application/json",
+														...(token
+															? { Authorization: `Bearer ${token}` }
+															: {}),
+													},
+													body: JSON.stringify({ content: html }),
+												});
+												if (!res.ok)
+													throw new Error(`Failed to save about me: ${res.status}`);
+												// Only clear dirty if content hasn't changed since this save started
+												if (latestContentRef.current === html) {
+													setDirty(false);
+												}
+											} catch (e) {
+												console.error(e);
+												// keep dirty = true so the dot stays visible
+											}
+										}
+									: undefined
+							}
+						/>
+					</div>
+				</main>
+			</div>
+		</>
+	);
 }
 
 export default function App() {
@@ -1412,6 +1645,7 @@ function Archive() {
 	const [error, setError] = useState<string | undefined>();
 	const [siteTitle, setSiteTitle] = useState<string>("");
 	const [heroImage, setHeroImage] = useState<string>("");
+	const [aboutEnabled, setAboutEnabled] = useState<boolean>(false);
 	const [contextMenu, setContextMenu] = useState<{
 		x: number;
 		y: number;
@@ -1483,6 +1717,7 @@ function Archive() {
 					const data = await res.json();
 					setSiteTitle(data.siteTitle || "");
 					setHeroImage(data.heroImage || "");
+					setAboutEnabled(data.aboutEnabled === "true");
 				}
 			} catch {}
 		};
@@ -1497,6 +1732,7 @@ function Archive() {
 				isAuthenticated={isAuthenticated}
 				onLogout={logout}
 				onSettings={() => window.location.assign("/settings")}
+				aboutEnabled={aboutEnabled}
 			/>
 			<div className="home-content">
 				{heroImage && (

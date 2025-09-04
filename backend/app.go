@@ -1036,6 +1036,67 @@ func (a *App) routes() {
         }
     })
 
+    // About Me endpoints
+    mux.HandleFunc("/api/about", func(w http.ResponseWriter, r *http.Request) {
+        switch r.Method {
+        case http.MethodGet:
+            // Get about me content and enabled status
+            var aboutContent, aboutEnabled string
+            
+            // Get content
+            err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = 'aboutContent'`).Scan(&aboutContent)
+            if err != nil && !errors.Is(err, sql.ErrNoRows) {
+                http.Error(w, "db error", http.StatusInternalServerError)
+                return
+            }
+            
+            // Get enabled status
+            err = a.DB.QueryRow(`SELECT value FROM settings WHERE key = 'aboutEnabled'`).Scan(&aboutEnabled)
+            if err != nil && !errors.Is(err, sql.ErrNoRows) {
+                http.Error(w, "db error", http.StatusInternalServerError)
+                return
+            }
+            
+            // Default to disabled if not set
+            if aboutEnabled == "" {
+                aboutEnabled = "false"
+            }
+            
+            w.Header().Set("Content-Type", "application/json")
+            _ = json.NewEncoder(w).Encode(map[string]interface{}{
+                "content": aboutContent,
+                "enabled": aboutEnabled == "true",
+            })
+            return
+        case http.MethodPut:
+            // Protect about me updates
+            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+                var payload struct{ Content string `json:"content"` }
+                if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+                    http.Error(w, "invalid json", http.StatusBadRequest)
+                    return
+                }
+                
+                now := time.Now()
+                _, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('aboutContent', ?, ?)`, 
+                    payload.Content, now)
+                if err != nil {
+                    http.Error(w, "db error", http.StatusInternalServerError)
+                    return
+                }
+                
+                w.Header().Set("Content-Type", "application/json")
+                _ = json.NewEncoder(w).Encode(map[string]interface{}{
+                    "content": payload.Content,
+                })
+            })(w, r)
+            return
+        default:
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+    })
+
     // Static files
     mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
         p := r.URL.Path
