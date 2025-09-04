@@ -301,11 +301,15 @@ function Header({
 	isAuthenticated,
 	onLogout,
 	onSettings,
+	onNewPost,
+	creating,
 }: {
 	siteTitle: string;
 	isAuthenticated: boolean;
 	onLogout: () => void;
 	onSettings: () => void;
+	onNewPost?: () => void;
+	creating?: boolean;
 }) {
 	const path = typeof window !== "undefined" ? window.location.pathname : "/";
 	return (
@@ -335,6 +339,15 @@ function Header({
 							<button className="header-button" onClick={onSettings}>
 								Settings
 							</button>
+							{onNewPost && (
+								<button
+									className="header-button"
+									onClick={onNewPost}
+									disabled={creating}
+								>
+									{creating ? "Creating..." : "New Post"}
+								</button>
+							)}
 							<button className="header-button" onClick={onLogout}>
 								Logout
 							</button>
@@ -421,6 +434,7 @@ function Home() {
 	const [error, setError] = useState<string | undefined>();
 	const [intro, setIntro] = useState<string>("");
 	const [siteTitle, setSiteTitle] = useState<string>("");
+	const [creating, setCreating] = useState(false);
 	const [contextMenu, setContextMenu] = useState<{
 		x: number;
 		y: number;
@@ -543,6 +557,25 @@ function Home() {
 		loadSettings();
 	}, []);
 
+	const handleNewPost = async () => {
+		if (creating || !isAuthenticated) return;
+		setCreating(true);
+		try {
+			const res = await fetch("/api/posts", {
+				method: "POST",
+				headers: token ? { Authorization: `Bearer ${token}` } : {},
+			});
+			if (!res.ok) throw new Error(`Failed to create note: ${res.status}`);
+			const note = await res.json();
+			window.location.assign(`/posts/${note.id}`);
+		} catch (e) {
+			console.error(e);
+			alert("Failed to create a new post");
+		} finally {
+			setCreating(false);
+		}
+	};
+
 	const handleDeletePost = async (postId: number) => {
 		if (!isAuthenticated || !token) return;
 		try {
@@ -583,6 +616,8 @@ function Home() {
 				isAuthenticated={isAuthenticated}
 				onLogout={logout}
 				onSettings={() => window.location.assign("/settings")}
+				onNewPost={handleNewPost}
+				creating={creating}
 			/>
 			<div className="home-content">
 				<p className="intro-text">
@@ -901,6 +936,7 @@ function PostEditor({ id }: { id: string }) {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
 	const [dirty, setDirty] = useState(false);
+	const [creating, setCreating] = useState(false);
 	const [siteTitle, setSiteTitle] = useState<string>("");
 	const editorRef = useRef<EditorRef>(null);
 	const latestContentRef = useRef<string>("");
@@ -928,6 +964,25 @@ function PostEditor({ id }: { id: string }) {
 
 		const data = await response.json();
 		return data.url;
+	};
+
+	const handleNewPost = async () => {
+		if (creating || !isAuthenticated) return;
+		setCreating(true);
+		try {
+			const res = await fetch("/api/posts", {
+				method: "POST",
+				headers: token ? { Authorization: `Bearer ${token}` } : {},
+			});
+			if (!res.ok) throw new Error(`Failed to create note: ${res.status}`);
+			const note = await res.json();
+			window.location.assign(`/posts/${note.id}`);
+		} catch (e) {
+			console.error(e);
+			alert("Failed to create a new post");
+		} finally {
+			setCreating(false);
+		}
 	};
 
 	useEffect(() => {
@@ -991,23 +1046,12 @@ function PostEditor({ id }: { id: string }) {
 				isAuthenticated={isAuthenticated}
 				onLogout={logout}
 				onSettings={() => window.location.assign("/settings")}
+				onNewPost={handleNewPost}
+				creating={creating}
 			/>
 			{dirty && (
 				<div className="unsaved-indicator" aria-label="Unsaved changes" />
 			)}
-			{/* Temporary debug indicator */}
-			<div
-				style={{
-					position: "fixed",
-					top: "30px",
-					right: "16px",
-					fontSize: "12px",
-					background: "yellow",
-					padding: "2px 4px",
-				}}
-			>
-				Dirty: {dirty ? "YES" : "NO"}
-			</div>
 			<div className="app-container editor-page">
 				<main>
 					<div className="editor-wrap">
@@ -1018,7 +1062,6 @@ function PostEditor({ id }: { id: string }) {
 							onChange={
 								isAuthenticated
 									? (html) => {
-											console.log("Content changed, setting dirty to true");
 											setContent(html);
 											latestContentRef.current = html;
 											setDirty(true);
@@ -1044,9 +1087,6 @@ function PostEditor({ id }: { id: string }) {
 													throw new Error(`Failed to save note: ${res.status}`);
 												// Only clear dirty if content hasn't changed since this save started
 												if (latestContentRef.current === html) {
-													console.log(
-														"Auto-save successful, clearing dirty state",
-													);
 													setDirty(false);
 												}
 											} catch (e) {
@@ -1134,8 +1174,8 @@ export default function App() {
 			getPresetById("inter-plusjakarta") || getPresetById("figtree-epilogue");
 		if (preset) {
 			const root = document.documentElement;
-			root.style.setProperty("--font-body", preset.heading);
-			root.style.setProperty("--font-heading", preset.body);
+			root.style.setProperty("--font-body", preset.body);
+			root.style.setProperty("--font-heading", preset.heading);
 		}
 	}, []);
 
@@ -1152,6 +1192,48 @@ function Archive() {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
 	const [siteTitle, setSiteTitle] = useState<string>("");
+	const [contextMenu, setContextMenu] = useState<{
+		x: number;
+		y: number;
+		postId: number;
+	} | null>(null);
+	const [confirmDialog, setConfirmDialog] = useState<{
+		postId: number;
+		title: string;
+	} | null>(null);
+
+	const handleDeletePost = async (postId: number) => {
+		if (!isAuthenticated || !token) return;
+		try {
+			const res = await fetch(`/api/posts/${postId}`, {
+				method: "DELETE",
+				headers: { Authorization: `Bearer ${token}` },
+			});
+			if (!res.ok) throw new Error(`Failed to delete post: ${res.status}`);
+			// Remove post from local state immediately for responsive UI
+			setPosts((prev) => prev.filter((p) => p.id !== postId));
+		} catch (e) {
+			console.error(e);
+			alert("Failed to delete post");
+		}
+	};
+
+	const handleRightClick = (e: React.MouseEvent, postId: number) => {
+		if (!isAuthenticated) return;
+		e.preventDefault();
+		setContextMenu({ x: e.clientX, y: e.clientY, postId });
+	};
+
+	const handleDeleteClick = (postId: number, postTitle: string) => {
+		setContextMenu(null);
+		setConfirmDialog({ postId, title: postTitle });
+	};
+
+	const handleConfirmDelete = async () => {
+		if (!confirmDialog) return;
+		await handleDeletePost(confirmDialog.postId);
+		setConfirmDialog(null);
+	};
 
 	useEffect(() => {
 		const load = async () => {
@@ -1207,8 +1289,12 @@ function Archive() {
 						<ul className="post-list">
 							{posts.map((p) => (
 								<li key={p.id}>
-									<a href={`/posts/${p.id}`} className="post-link">
-										<span className="post-title">
+									<a
+										href={`/posts/${p.id}`}
+										className="post-link group"
+										onContextMenu={(e) => handleRightClick(e, p.id)}
+									>
+										<span className="post-title group-underline">
 											{p.title && p.title.trim() ? p.title : "Untitled"}
 										</span>
 										{p.updatedAt && (
@@ -1227,6 +1313,28 @@ function Archive() {
 						</ul>
 					))}
 			</div>
+
+			{contextMenu && (
+				<ContextMenu
+					x={contextMenu.x}
+					y={contextMenu.y}
+					onDelete={() => {
+						const post = posts.find((p) => p.id === contextMenu.postId);
+						const title =
+							post?.title && post.title.trim() ? post.title : "Untitled";
+						handleDeleteClick(contextMenu.postId, title);
+					}}
+					onClose={() => setContextMenu(null)}
+				/>
+			)}
+
+			{confirmDialog && (
+				<ConfirmDialog
+					message={`Are you sure you want to delete "${confirmDialog.title}"?`}
+					onConfirm={handleConfirmDelete}
+					onCancel={() => setConfirmDialog(null)}
+				/>
+			)}
 		</div>
 	);
 }
