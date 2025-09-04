@@ -512,6 +512,7 @@ function Home() {
 	const [error, setError] = useState<string | undefined>();
 	const [intro, setIntro] = useState<string>("");
 	const [siteTitle, setSiteTitle] = useState<string>("");
+	const [heroImage, setHeroImage] = useState<string>("");
 	const [creating, setCreating] = useState(false);
 	const [contextMenu, setContextMenu] = useState<{
 		x: number;
@@ -627,6 +628,7 @@ function Home() {
 					const data = await res.json();
 					setIntro(data.introText || "");
 					setSiteTitle(data.siteTitle || "");
+					setHeroImage(data.heroImage || "");
 				}
 			} catch (e) {
 				console.error("Failed to load settings:", e);
@@ -698,6 +700,18 @@ function Home() {
 				creating={creating}
 			/>
 			<div className="home-content">
+				{heroImage && (
+					<img
+						src={heroImage}
+						alt="Hero image"
+						style={{
+							width: "150px",
+							height: "auto",
+							marginBottom: "16px",
+							borderRadius: "6px",
+						}}
+					/>
+				)}
 				<p className="intro-text">
 					{intro && intro.trim()
 						? intro
@@ -775,6 +789,8 @@ function Settings() {
 	const { isAuthenticated, token, logout } = useAuth();
 	const [introText, setIntroText] = useState<string>("");
 	const [siteTitle, setSiteTitle] = useState<string>("");
+	const [heroImage, setHeroImage] = useState<string>("");
+	const [uploading, setUploading] = useState(false);
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
 
@@ -787,6 +803,7 @@ function Settings() {
 					const data = await res.json();
 					setIntroText(data.introText || "");
 					setSiteTitle(data.siteTitle || "");
+					setHeroImage(data.heroImage || "");
 				}
 			} catch (e) {
 				console.error("Failed to load settings:", e);
@@ -796,6 +813,37 @@ function Settings() {
 		};
 		loadSettings();
 	}, []);
+
+	const handleImageUpload = async (file: File) => {
+		if (!isAuthenticated || !token) return;
+		setUploading(true);
+
+		try {
+			const formData = new FormData();
+			formData.append("file", file);
+
+			const response = await fetch("/api/uploads", {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${token}`,
+				},
+				body: formData,
+			});
+
+			if (!response.ok) {
+				const errorText = await response.text();
+				throw new Error(`Upload failed: ${errorText}`);
+			}
+
+			const data = await response.json();
+			setHeroImage(data.url);
+		} catch (e) {
+			console.error("Image upload error:", e);
+			alert(`Failed to upload image: ${e.message}`);
+		} finally {
+			setUploading(false);
+		}
+	};
 
 	const handleSave = async () => {
 		if (!isAuthenticated || !token) return;
@@ -847,6 +895,30 @@ function Settings() {
 
 			const titleResult = await titleRes.json();
 			console.log("Site title saved successfully:", titleResult);
+
+			// Save hero image URL
+			if (heroImage !== undefined) {
+				console.log("Saving hero image...");
+				const heroRes = await fetch("/api/settings", {
+					method: "PUT",
+					headers: {
+						"Content-Type": "application/json",
+						Authorization: `Bearer ${token}`,
+					},
+					body: JSON.stringify({ key: "heroImage", value: heroImage }),
+				});
+
+				if (!heroRes.ok) {
+					const errorText = await heroRes.text();
+					console.error("Failed to save hero image:", heroRes.status, errorText);
+					throw new Error(
+						`Failed to save hero image: ${heroRes.status} - ${errorText}`,
+					);
+				}
+
+				const heroResult = await heroRes.json();
+				console.log("Hero image saved successfully:", heroResult);
+			}
 
 			console.log("All settings saved successfully, redirecting...");
 			window.location.assign("/");
@@ -947,6 +1019,73 @@ function Settings() {
 							placeholder="Enter your site title"
 							disabled={saving}
 						/>
+					</div>
+
+					<div style={{ marginBottom: "24px" }}>
+						<label
+							style={{ display: "block", margin: "12px 0 6px", color: "#444" }}
+						>
+							Hero image
+						</label>
+						<input
+							type="file"
+							accept="image/*"
+							onChange={(e) => {
+								const file = e.target.files?.[0];
+								if (file) {
+									handleImageUpload(file);
+								}
+							}}
+							style={{
+								width: "100%",
+								fontFamily: "Inter, system-ui, sans-serif",
+								fontSize: 14,
+								padding: 10,
+								boxSizing: "border-box",
+								border: "1px solid #d1d5db",
+								borderRadius: 6,
+							}}
+							disabled={saving || uploading}
+						/>
+						{uploading && (
+							<div style={{ marginTop: 8, fontSize: 14, color: "#666" }}>
+								Uploading...
+							</div>
+						)}
+						{heroImage && (
+							<div style={{ marginTop: 12 }}>
+								<div style={{ fontSize: 14, color: "#666", marginBottom: 8 }}>
+									Current hero image:
+								</div>
+								<img
+									src={heroImage}
+									alt="Hero preview"
+									style={{
+										width: "150px",
+										height: "auto",
+										border: "1px solid #d1d5db",
+										borderRadius: 6,
+									}}
+								/>
+								<button
+									onClick={() => setHeroImage("")}
+									style={{
+										display: "block",
+										marginTop: 8,
+										background: "transparent",
+										border: "1px solid #dc2626",
+										color: "#dc2626",
+										padding: "4px 8px",
+										borderRadius: 4,
+										fontSize: 12,
+										cursor: "pointer",
+									}}
+									disabled={saving}
+								>
+									Remove image
+								</button>
+							</div>
+						)}
 					</div>
 
 					<div>
@@ -1270,6 +1409,7 @@ function Archive() {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
 	const [siteTitle, setSiteTitle] = useState<string>("");
+	const [heroImage, setHeroImage] = useState<string>("");
 	const [contextMenu, setContextMenu] = useState<{
 		x: number;
 		y: number;
@@ -1340,6 +1480,7 @@ function Archive() {
 				if (res.ok) {
 					const data = await res.json();
 					setSiteTitle(data.siteTitle || "");
+					setHeroImage(data.heroImage || "");
 				}
 			} catch {}
 		};
@@ -1356,6 +1497,18 @@ function Archive() {
 				onSettings={() => window.location.assign("/settings")}
 			/>
 			<div className="home-content">
+				{heroImage && (
+					<img
+						src={heroImage}
+						alt="Hero image"
+						style={{
+							width: "150px",
+							height: "auto",
+							marginBottom: "16px",
+							borderRadius: "6px",
+						}}
+					/>
+				)}
 				<h1>Archive</h1>
 				{loading && <p>Loading…</p>}
 				{error && <p>{error}</p>}
