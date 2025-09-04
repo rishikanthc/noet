@@ -2,8 +2,10 @@ package main
 
 import (
     "crypto/rand"
+    "crypto/sha256"
     "database/sql"
     "embed"
+    "encoding/base64"
     "encoding/json"
     "errors"
     "fmt"
@@ -80,10 +82,10 @@ func NewApp(dbPath string) (*App, error) {
         return nil, err
     }
 
-    // Generate JWT secret
-    jwtSecret := make([]byte, 32)
-    if _, err := rand.Read(jwtSecret); err != nil {
-        return nil, fmt.Errorf("failed to generate JWT secret: %v", err)
+    // Get or generate persistent JWT secret
+    jwtSecret, err := getOrCreateJWTSecret(db)
+    if err != nil {
+        return nil, fmt.Errorf("failed to get JWT secret: %v", err)
     }
 
     a := &App{
@@ -128,7 +130,91 @@ CREATE TABLE IF NOT EXISTS attachments (
   size INTEGER NOT NULL,
   created_at DATETIME NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  token_hash TEXT UNIQUE NOT NULL,
+  expires_at DATETIME NOT NULL,
+  created_at DATETIME NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 `)
+    return err
+}
+
+func getOrCreateJWTSecret(db *sql.DB) ([]byte, error) {
+    var secretStr string
+    err := db.QueryRow(`SELECT value FROM settings WHERE key = 'jwt_secret'`).Scan(&secretStr)
+    
+    if err == sql.ErrNoRows {
+        // Generate new secret
+        secret := make([]byte, 32)
+        if _, err := rand.Read(secret); err != nil {
+            return nil, err
+        }
+        
+        secretStr = base64.StdEncoding.EncodeToString(secret)
+        
+        // Store in database
+        _, err = db.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('jwt_secret', ?, ?)`, 
+            secretStr, time.Now())
+        if err != nil {
+            return nil, err
+        }
+        
+        return secret, nil
+    } else if err != nil {
+        return nil, err
+    }
+    
+    // Decode existing secret
+    return base64.StdEncoding.DecodeString(secretStr)
+}
+
+func (a *App) createRefreshToken(userID int64) (string, error) {
+    // Generate random refresh token
+    tokenBytes := make([]byte, 32)
+    if _, err := rand.Read(tokenBytes); err != nil {
+        return "", err
+    }
+    
+    refreshToken := base64.URLEncoding.EncodeToString(tokenBytes)
+    tokenHash := sha256.Sum256([]byte(refreshToken))
+    
+    // Clean up expired tokens for this user
+    _, _ = a.DB.Exec(`DELETE FROM refresh_tokens WHERE user_id = ? AND expires_at < ?`, userID, time.Now())
+    
+    // Store in database (30 days expiry)
+    expiresAt := time.Now().Add(30 * 24 * time.Hour)
+    _, err := a.DB.Exec(`INSERT INTO refresh_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)`, 
+        userID, base64.StdEncoding.EncodeToString(tokenHash[:]), expiresAt, time.Now())
+    if err != nil {
+        return "", err
+    }
+    
+    return refreshToken, nil
+}
+
+func (a *App) validateRefreshToken(refreshToken string) (int64, error) {
+    tokenHash := sha256.Sum256([]byte(refreshToken))
+    tokenHashStr := base64.StdEncoding.EncodeToString(tokenHash[:])
+    
+    var userID int64
+    err := a.DB.QueryRow(`SELECT user_id FROM refresh_tokens WHERE token_hash = ? AND expires_at > ?`, 
+        tokenHashStr, time.Now()).Scan(&userID)
+    if err != nil {
+        return 0, err
+    }
+    
+    return userID, nil
+}
+
+func (a *App) revokeRefreshToken(refreshToken string) error {
+    tokenHash := sha256.Sum256([]byte(refreshToken))
+    tokenHashStr := base64.StdEncoding.EncodeToString(tokenHash[:])
+    
+    _, err := a.DB.Exec(`DELETE FROM refresh_tokens WHERE token_hash = ?`, tokenHashStr)
     return err
 }
 
@@ -197,7 +283,7 @@ func (a *App) generateJWT(user *User) (string, error) {
         UserID:   user.ID,
         Username: user.Username,
         RegisteredClaims: jwt.RegisteredClaims{
-            ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+            ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)), // 7 days
             IssuedAt:  jwt.NewNumericDate(time.Now()),
         },
     }
@@ -443,9 +529,16 @@ func (a *App) routes() {
             return
         }
         
+        refreshToken, err := a.createRefreshToken(user.ID)
+        if err != nil {
+            http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
+            return
+        }
+        
         w.Header().Set("Content-Type", "application/json")
         _ = json.NewEncoder(w).Encode(map[string]interface{}{
             "token": token,
+            "refreshToken": refreshToken,
             "user": map[string]interface{}{
                 "id": user.ID,
                 "username": user.Username,
@@ -482,9 +575,16 @@ func (a *App) routes() {
             return
         }
         
+        refreshToken, err := a.createRefreshToken(user.ID)
+        if err != nil {
+            http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
+            return
+        }
+        
         w.Header().Set("Content-Type", "application/json")
         _ = json.NewEncoder(w).Encode(map[string]interface{}{
             "token": token,
+            "refreshToken": refreshToken,
             "user": map[string]interface{}{
                 "id": user.ID,
                 "username": user.Username,
@@ -522,6 +622,70 @@ func (a *App) routes() {
             "user": map[string]interface{}{
                 "id": claims.UserID,
                 "username": claims.Username,
+            },
+        })
+    })
+
+    // Token refresh endpoint
+    mux.HandleFunc("/api/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        
+        var payload struct {
+            RefreshToken string `json:"refreshToken"`
+        }
+        
+        if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+            http.Error(w, "invalid json", http.StatusBadRequest)
+            return
+        }
+        
+        if payload.RefreshToken == "" {
+            http.Error(w, "refresh token required", http.StatusBadRequest)
+            return
+        }
+        
+        // Validate refresh token
+        userID, err := a.validateRefreshToken(payload.RefreshToken)
+        if err != nil {
+            http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+            return
+        }
+        
+        // Get user
+        var user User
+        row := a.DB.QueryRow(`SELECT id, username, created_at FROM users WHERE id = ?`, userID)
+        err = row.Scan(&user.ID, &user.Username, &user.CreatedAt)
+        if err != nil {
+            http.Error(w, "user not found", http.StatusUnauthorized)
+            return
+        }
+        
+        // Generate new tokens
+        newToken, err := a.generateJWT(&user)
+        if err != nil {
+            http.Error(w, "failed to generate token", http.StatusInternalServerError)
+            return
+        }
+        
+        newRefreshToken, err := a.createRefreshToken(user.ID)
+        if err != nil {
+            http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
+            return
+        }
+        
+        // Revoke old refresh token
+        _ = a.revokeRefreshToken(payload.RefreshToken)
+        
+        w.Header().Set("Content-Type", "application/json")
+        _ = json.NewEncoder(w).Encode(map[string]interface{}{
+            "token": newToken,
+            "refreshToken": newRefreshToken,
+            "user": map[string]interface{}{
+                "id": user.ID,
+                "username": user.Username,
             },
         })
     })

@@ -29,6 +29,7 @@ type AuthContextType = {
 	register: (username: string, password: string) => Promise<boolean>;
 	logout: () => void;
 	isAuthenticated: boolean;
+	refreshToken: () => Promise<boolean>;
 };
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -44,10 +45,13 @@ function useAuth() {
 function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [user, setUser] = useState<User | null>(null);
 	const [token, setToken] = useState<string | null>(null);
+	const [refreshTokenValue, setRefreshTokenValue] = useState<string | null>(null);
 
 	useEffect(() => {
-		// Check for existing token in localStorage
+		// Check for existing tokens in localStorage
 		const savedToken = localStorage.getItem("auth_token");
+		const savedRefreshToken = localStorage.getItem("refresh_token");
+		
 		if (savedToken) {
 			// Validate token
 			fetch("/api/auth/validate", {
@@ -58,15 +62,57 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 					if (data.valid) {
 						setToken(savedToken);
 						setUser(data.user);
+						if (savedRefreshToken) {
+							setRefreshTokenValue(savedRefreshToken);
+						}
 					} else {
-						localStorage.removeItem("auth_token");
+						// Token expired, try refresh if we have refresh token
+						if (savedRefreshToken) {
+							attemptRefresh(savedRefreshToken);
+						} else {
+							// No refresh token, clear everything
+							localStorage.removeItem("auth_token");
+							localStorage.removeItem("refresh_token");
+						}
 					}
 				})
 				.catch(() => {
-					localStorage.removeItem("auth_token");
+					// Error validating, try refresh if we have refresh token
+					if (savedRefreshToken) {
+						attemptRefresh(savedRefreshToken);
+					} else {
+						localStorage.removeItem("auth_token");
+						localStorage.removeItem("refresh_token");
+					}
 				});
 		}
 	}, []);
+
+	const attemptRefresh = async (refreshToken: string) => {
+		try {
+			const res = await fetch("/api/auth/refresh", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ refreshToken }),
+			});
+
+			if (res.ok) {
+				const data = await res.json();
+				setToken(data.token);
+				setUser(data.user);
+				setRefreshTokenValue(data.refreshToken);
+				localStorage.setItem("auth_token", data.token);
+				localStorage.setItem("refresh_token", data.refreshToken);
+			} else {
+				// Refresh failed, clear everything
+				localStorage.removeItem("auth_token");
+				localStorage.removeItem("refresh_token");
+			}
+		} catch {
+			localStorage.removeItem("auth_token");
+			localStorage.removeItem("refresh_token");
+		}
+	};
 
 	const login = async (
 		username: string,
@@ -83,7 +129,9 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 				const data = await res.json();
 				setToken(data.token);
 				setUser(data.user);
+				setRefreshTokenValue(data.refreshToken);
 				localStorage.setItem("auth_token", data.token);
+				localStorage.setItem("refresh_token", data.refreshToken);
 				return true;
 			}
 			return false;
@@ -95,7 +143,9 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 	const logout = () => {
 		setToken(null);
 		setUser(null);
+		setRefreshTokenValue(null);
 		localStorage.removeItem("auth_token");
+		localStorage.removeItem("refresh_token");
 	};
 
 	const register = async (
@@ -113,7 +163,34 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 				const data = await res.json();
 				setToken(data.token);
 				setUser(data.user);
+				setRefreshTokenValue(data.refreshToken);
 				localStorage.setItem("auth_token", data.token);
+				localStorage.setItem("refresh_token", data.refreshToken);
+				return true;
+			}
+			return false;
+		} catch {
+			return false;
+		}
+	};
+
+	const refreshToken = async (): Promise<boolean> => {
+		if (!refreshTokenValue) return false;
+		
+		try {
+			const res = await fetch("/api/auth/refresh", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ refreshToken: refreshTokenValue }),
+			});
+
+			if (res.ok) {
+				const data = await res.json();
+				setToken(data.token);
+				setUser(data.user);
+				setRefreshTokenValue(data.refreshToken);
+				localStorage.setItem("auth_token", data.token);
+				localStorage.setItem("refresh_token", data.refreshToken);
 				return true;
 			}
 			return false;
@@ -131,6 +208,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 				register,
 				logout,
 				isAuthenticated: !!token && !!user,
+				refreshToken,
 			}}
 		>
 			{children}
