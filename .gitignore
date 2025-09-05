@@ -8,3 +8,12 @@ backend/noet.db
 backend
 uploads
 .DS_Store
+frontend/node_modules/.bin
+frontend/node_modules/@ampproject/remapping/dist
+frontend/node_modules/@babel
+frontend/node_modules/@esbuild
+frontend/node_modules/@floating-ui
+frontend/node_modules/@jridgewell
+frontend/node_modules/@remirror
+frontend/node_modules/@rolldown
+frontend/node_modules
