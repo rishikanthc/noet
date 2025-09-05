@@ -11,7 +11,7 @@
   "dependencies": {
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "textforge": "^1.0.3"
+    "textforge": "^1.1.2"
   },
   "devDependencies": {
     "@types/react": "^19.1.10",

@@ -6,7 +6,7 @@ import {
 	createContext,
 	useContext,
 } from "react";
-import { Editor, type EditorRef, getPresetById } from "textforge";
+import { Editor, type EditorRef, type MentionItem, getPresetById } from "textforge";
 import "./styles.css";
 
 type Note = {
@@ -1212,6 +1212,8 @@ function PostEditor({ id }: { id: string }) {
 	const [dirty, setDirty] = useState(false);
 	const [creating, setCreating] = useState(false);
 	const [siteTitle, setSiteTitle] = useState<string>("");
+	const [postMentions, setPostMentions] = useState<MentionItem[]>([]);
+	const [mentionsLoaded, setMentionsLoaded] = useState(false);
 	const editorRef = useRef<EditorRef>(null);
 	const latestContentRef = useRef<string>("");
 
@@ -1285,7 +1287,7 @@ function PostEditor({ id }: { id: string }) {
 	}, [id]);
 
 	useEffect(() => {
-		// Load site title
+		// Load site title and post mentions
 		const loadSettings = async () => {
 			try {
 				const res = await fetch("/api/settings");
@@ -1297,10 +1299,38 @@ function PostEditor({ id }: { id: string }) {
 				console.error("Failed to load settings:", e);
 			}
 		};
-		loadSettings();
-	}, []);
 
-	if (loading)
+		const loadPostMentions = async () => {
+			try {
+				const res = await fetch("/api/posts");
+				if (res.ok) {
+					const posts: Note[] = await res.json();
+					// Convert posts to mention items, excluding current post
+					const mentions: MentionItem[] = posts
+						.filter(post => post.id.toString() !== id)
+						.map(post => ({
+							id: post.id.toString(),
+							label: post.title && post.title.trim() ? post.title : `Untitled Post ${post.id}`,
+							url: `/posts/${post.id}`
+						}));
+					setPostMentions(mentions);
+				} else {
+					console.error("Failed to fetch posts for mentions:", res.status, res.statusText);
+					setPostMentions([]);
+				}
+			} catch (e) {
+				console.error("Failed to load posts for mentions:", e);
+				setPostMentions([]);
+			} finally {
+				setMentionsLoaded(true);
+			}
+		};
+
+		loadSettings();
+		loadPostMentions();
+	}, [id]);
+
+	if (loading || !mentionsLoaded)
 		return (
 			<div className="app-container">
 				<p>Loading…</p>
@@ -1370,6 +1400,7 @@ function PostEditor({ id }: { id: string }) {
 										}
 									: undefined
 							}
+							mentions={postMentions}
 						/>
 					</div>
 				</main>
@@ -1452,6 +1483,8 @@ function AboutMe() {
 	const [dirty, setDirty] = useState(false);
 	const [siteTitle, setSiteTitle] = useState<string>("");
 	const [aboutEnabled, setAboutEnabled] = useState<boolean>(false);
+	const [postMentions, setPostMentions] = useState<MentionItem[]>([]);
+	const [mentionsLoaded, setMentionsLoaded] = useState(false);
 	const editorRef = useRef<EditorRef>(null);
 	const latestContentRef = useRef<string>("");
 
@@ -1506,7 +1539,7 @@ function AboutMe() {
 	}, []);
 
 	useEffect(() => {
-		// Load site settings
+		// Load site settings and post mentions
 		const loadSettings = async () => {
 			try {
 				const res = await fetch("/api/settings");
@@ -1519,7 +1552,34 @@ function AboutMe() {
 				console.error("Failed to load settings:", e);
 			}
 		};
+
+		const loadPostMentions = async () => {
+			try {
+				const res = await fetch("/api/posts");
+				if (res.ok) {
+					const posts: Note[] = await res.json();
+					// Convert posts to mention items for About Me page
+					const mentions: MentionItem[] = posts
+						.map(post => ({
+							id: post.id.toString(),
+							label: post.title && post.title.trim() ? post.title : `Untitled Post ${post.id}`,
+							url: `/posts/${post.id}`
+						}));
+					setPostMentions(mentions);
+				} else {
+					console.error("Failed to fetch posts for mentions:", res.status, res.statusText);
+					setPostMentions([]);
+				}
+			} catch (e) {
+				console.error("Failed to load posts for mentions:", e);
+				setPostMentions([]);
+			} finally {
+				setMentionsLoaded(true);
+			}
+		};
+
 		loadSettings();
+		loadPostMentions();
 	}, []);
 
 	// If About Me is disabled, show 404-like page
@@ -1542,7 +1602,7 @@ function AboutMe() {
 		);
 	}
 
-	if (loading)
+	if (loading || !mentionsLoaded)
 		return (
 			<div className="app-container">
 				<p>Loading…</p>
@@ -1611,6 +1671,7 @@ function AboutMe() {
 										}
 									: undefined
 							}
+							mentions={postMentions}
 						/>
 					</div>
 				</main>
