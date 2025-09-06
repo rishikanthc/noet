@@ -32,6 +32,39 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Global link styles */
+a {
+  color: #5046e6;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+/* Remove link highlighting/selection */
+a::selection {
+  background: transparent;
+}
+
+/* Mention link styles */
+.mention {
+  color: #5046e6 !important;
+  text-decoration: none !important;
+  background: transparent !important;
+  cursor: pointer !important;
+}
+
+.mention:hover {
+  text-decoration: underline !important;
+}
+
+.mention::selection {
+  background: #000;
+  color: #fff;
+}
+
 ::selection {
   background: #000;
   color: #fff;
@@ -188,6 +221,17 @@ header h1 {
 /* Override textforge default font size */
 .editor-wrap .quill-editor .ProseMirror {
   font-size: 17px !important;
+}
+
+/* Editor link styles */
+.editor-wrap .ProseMirror a {
+  color: #5046e6 !important;
+  text-decoration: none !important;
+  cursor: pointer !important;
+}
+
+.editor-wrap .ProseMirror a:hover {
+  text-decoration: underline !important;
 }
 
 /* Unsaved indicator: black filled circle in top-right */
