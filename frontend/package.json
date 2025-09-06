@@ -24,7 +24,7 @@
     "lucide-react": "^0.542.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
-    "textforge": "^1.2.3"
+    "textforge": "^1.2.6"
   },
   "devDependencies": {
     "@types/react": "^19.1.10",

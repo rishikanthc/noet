@@ -5,6 +5,7 @@ import {
 	useState,
 	createContext,
 	useContext,
+	useCallback,
 } from "react";
 import { Editor, type EditorRef, type MentionItem, getPresetById } from "textforge";
 import "./styles.css";
@@ -1214,8 +1215,32 @@ function PostEditor({ id }: { id: string }) {
 	const [siteTitle, setSiteTitle] = useState<string>("");
 	const [postMentions, setPostMentions] = useState<MentionItem[]>([]);
 	const [mentionsLoaded, setMentionsLoaded] = useState(false);
+	const [backlinks, setBacklinks] = useState<Note[]>([]);
+	const [backlinksLoading, setBacklinksLoading] = useState(false);
 	const editorRef = useRef<EditorRef>(null);
 	const latestContentRef = useRef<string>("");
+
+	const loadBacklinks = useCallback(async () => {
+		setBacklinksLoading(true);
+		console.log("Loading backlinks for post:", id);
+		try {
+			const res = await fetch(`/api/posts/${id}/backlinks`);
+			console.log("Backlinks response status:", res.status);
+			if (res.ok) {
+				const backlinksData: Note[] = await res.json();
+				console.log("Backlinks data:", backlinksData);
+				setBacklinks(backlinksData);
+			} else {
+				console.error("Failed to fetch backlinks:", res.status, res.statusText);
+				setBacklinks([]);
+			}
+		} catch (e) {
+			console.error("Failed to load backlinks:", e);
+			setBacklinks([]);
+		} finally {
+			setBacklinksLoading(false);
+		}
+	}, [id]);
 
 	const handleImageUpload = async (file: File): Promise<string> => {
 		if (!token) {
@@ -1326,9 +1351,11 @@ function PostEditor({ id }: { id: string }) {
 			}
 		};
 
+
 		loadSettings();
 		loadPostMentions();
-	}, [id]);
+		loadBacklinks();
+	}, [id, loadBacklinks]);
 
 	if (loading || !mentionsLoaded)
 		return (
@@ -1393,6 +1420,8 @@ function PostEditor({ id }: { id: string }) {
 												if (latestContentRef.current === html) {
 													setDirty(false);
 												}
+												// Refresh backlinks after save
+												loadBacklinks();
 											} catch (e) {
 												console.error(e);
 												// keep dirty = true so the dot stays visible
@@ -1400,9 +1429,75 @@ function PostEditor({ id }: { id: string }) {
 										}
 									: undefined
 							}
-							mentions={postMentions}
+							mentions={postMentions || []}
 						/>
 					</div>
+					
+					{/* Backlinks section */}
+					{console.log("Backlinks render check:", { backlinks, length: backlinks?.length })}
+					{backlinks && backlinks.length > 0 && (
+						<div className="backlinks-section" style={{ 
+							maxWidth: 800, 
+							margin: "48px auto 0", 
+							padding: "24px",
+							borderTop: "1px solid var(--hairline)"
+						}}>
+							<h3 style={{ 
+								fontSize: "18px", 
+								fontWeight: 500, 
+								margin: "0 0 16px",
+								color: "#666"
+							}}>
+								Linked from
+							</h3>
+							<ul style={{ 
+								listStyle: "none", 
+								margin: 0, 
+								padding: 0,
+								display: "flex",
+								flexDirection: "column",
+								gap: "8px"
+							}}>
+								{(backlinks || []).map((post) => (
+									<li key={post.id}>
+										<a
+											href={`/posts/${post.id}`}
+											style={{
+												color: "#111",
+												textDecoration: "none",
+												fontSize: "16px",
+												display: "block",
+												padding: "8px 0",
+												borderRadius: "4px",
+												transition: "background-color 0.1s ease"
+											}}
+											onMouseEnter={(e) => {
+												e.currentTarget.style.backgroundColor = "#f5f5f5";
+											}}
+											onMouseLeave={(e) => {
+												e.currentTarget.style.backgroundColor = "transparent";
+											}}
+										>
+											{post.title && post.title.trim() ? post.title : "Untitled"}
+											{post.updatedAt && (
+												<span style={{ 
+													color: "#666", 
+													fontSize: "14px", 
+													marginLeft: "8px"
+												}}>
+													— {new Date(post.updatedAt).toLocaleDateString(undefined, {
+														year: "numeric",
+														month: "short",
+														day: "numeric",
+													})}
+												</span>
+											)}
+										</a>
+									</li>
+								))}
+							</ul>
+						</div>
+					)}
 				</main>
 			</div>
 		</>
@@ -1671,7 +1766,7 @@ function AboutMe() {
 										}
 									: undefined
 							}
-							mentions={postMentions}
+							mentions={postMentions || []}
 						/>
 					</div>
 				</main>

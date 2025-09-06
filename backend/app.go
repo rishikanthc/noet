@@ -15,6 +15,8 @@ import (
     "os"
     "path"
     "path/filepath"
+    "regexp"
+    "strconv"
     "strings"
     "sync"
     "time"
@@ -139,6 +141,19 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   created_at DATETIME NOT NULL,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS post_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  source_post_id INTEGER NOT NULL,
+  target_post_id INTEGER NOT NULL,
+  created_at DATETIME NOT NULL,
+  FOREIGN KEY (source_post_id) REFERENCES posts(id) ON DELETE CASCADE,
+  FOREIGN KEY (target_post_id) REFERENCES posts(id) ON DELETE CASCADE,
+  UNIQUE(source_post_id, target_post_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_post_links_source ON post_links(source_post_id);
+CREATE INDEX IF NOT EXISTS idx_post_links_target ON post_links(target_post_id);
 `)
     return err
 }
@@ -366,6 +381,102 @@ func extractTitleFromHTML(htmlStr string) string {
     title := strings.TrimSpace(b.String())
     title = strings.Join(strings.Fields(title), " ")
     return title
+}
+
+// extractMentionsFromHTML extracts mention links from HTML content
+// Returns a slice of target post IDs that are mentioned
+func extractMentionsFromHTML(htmlStr string) []int64 {
+    fmt.Printf("Extracting mentions from HTML: %s\n", htmlStr)
+    
+    // Regex to find mention links with both data-mention-id and data-link-type="bidirectional" in any order
+    re := regexp.MustCompile(`<a[^>]*class="mention"[^>]*data-mention-id="(\d+)"[^>]*>`)
+    matches := re.FindAllStringSubmatch(htmlStr, -1)
+    
+    fmt.Printf("Regex matches found: %d\n", len(matches))
+    for i, match := range matches {
+        fmt.Printf("Match %d: %v\n", i, match)
+    }
+    
+    var mentionIDs []int64
+    for _, match := range matches {
+        if len(match) > 1 {
+            if id, err := strconv.ParseInt(match[1], 10, 64); err == nil {
+                mentionIDs = append(mentionIDs, id)
+            }
+        }
+    }
+    
+    fmt.Printf("Extracted mention IDs: %v\n", mentionIDs)
+    return mentionIDs
+}
+
+// updatePostLinks updates the bi-directional links for a post
+func (a *App) updatePostLinks(sourcePostID int64, htmlContent string) error {
+    // Extract mentions from the HTML content
+    mentionIDs := extractMentionsFromHTML(htmlContent)
+    
+    // Remove existing links for this source post
+    _, err := a.DB.Exec(`DELETE FROM post_links WHERE source_post_id = ?`, sourcePostID)
+    if err != nil {
+        return fmt.Errorf("failed to delete existing links: %v", err)
+    }
+    
+    // Add new links
+    now := time.Now()
+    for _, targetID := range mentionIDs {
+        // Don't create self-links
+        if targetID == sourcePostID {
+            continue
+        }
+        
+        // Check if target post exists
+        var exists int
+        err = a.DB.QueryRow(`SELECT 1 FROM posts WHERE id = ?`, targetID).Scan(&exists)
+        if err == sql.ErrNoRows {
+            // Target post doesn't exist, skip this link
+            continue
+        } else if err != nil {
+            return fmt.Errorf("failed to check target post existence: %v", err)
+        }
+        
+        // Insert the link
+        _, err = a.DB.Exec(`
+            INSERT OR IGNORE INTO post_links (source_post_id, target_post_id, created_at) 
+            VALUES (?, ?, ?)
+        `, sourcePostID, targetID, now)
+        if err != nil {
+            return fmt.Errorf("failed to insert link: %v", err)
+        }
+    }
+    
+    return nil
+}
+
+// getPostBacklinks retrieves all posts that link to the given post
+func (a *App) getPostBacklinks(postID int64) ([]Post, error) {
+    rows, err := a.DB.Query(`
+        SELECT p.id, p.title, p.content, p.created_at, p.updated_at
+        FROM posts p
+        JOIN post_links pl ON p.id = pl.source_post_id
+        WHERE pl.target_post_id = ?
+        ORDER BY p.updated_at DESC
+    `, postID)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    var posts []Post
+    for rows.Next() {
+        var p Post
+        err := rows.Scan(&p.ID, &p.Title, &p.Content, &p.CreatedAt, &p.UpdatedAt)
+        if err != nil {
+            return nil, err
+        }
+        posts = append(posts, p)
+    }
+
+    return posts, rows.Err()
 }
 
 func (a *App) ensureUploadsDir() error {
@@ -742,11 +853,40 @@ func (a *App) routes() {
 
     // Individual post: GET/PUT/DELETE
     mux.HandleFunc("/api/posts/", func(w http.ResponseWriter, r *http.Request) {
-        idStr := strings.TrimPrefix(r.URL.Path, "/api/posts/")
-        if idStr == "" {
+        path := strings.TrimPrefix(r.URL.Path, "/api/posts/")
+        if path == "" {
             http.NotFound(w, r)
             return
         }
+        
+        // Handle backlinks sub-path
+        if strings.HasSuffix(path, "/backlinks") {
+            if r.Method != http.MethodGet {
+                http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+                return
+            }
+            
+            idStr := strings.TrimSuffix(path, "/backlinks")
+            postID, err := strconv.ParseInt(idStr, 10, 64)
+            if err != nil {
+                http.Error(w, "invalid post ID", http.StatusBadRequest)
+                return
+            }
+            
+            // Get backlinks
+            backlinks, err := a.getPostBacklinks(postID)
+            if err != nil {
+                http.Error(w, "db error", http.StatusInternalServerError)
+                return
+            }
+            
+            w.Header().Set("Content-Type", "application/json")
+            _ = json.NewEncoder(w).Encode(backlinks)
+            return
+        }
+        
+        // Regular individual post operations
+        idStr := path
         switch r.Method {
         case http.MethodGet:
             p, err := a.getPost(idStr)
@@ -781,6 +921,15 @@ func (a *App) routes() {
                     http.Error(w, "db error", http.StatusInternalServerError)
                     return
                 }
+                
+                // Parse post ID and update bi-directional links
+                if postID, parseErr := strconv.ParseInt(idStr, 10, 64); parseErr == nil {
+                    if linkErr := a.updatePostLinks(postID, payload.Content); linkErr != nil {
+                        // Log the error but don't fail the request
+                        fmt.Printf("Warning: failed to update post links for post %d: %v\n", postID, linkErr)
+                    }
+                }
+                
                 p, err := a.getPost(idStr)
                 if err != nil {
                     if errors.Is(err, sql.ErrNoRows) {
