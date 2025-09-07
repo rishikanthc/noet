@@ -614,10 +614,12 @@ function Home() {
 				});
 				if (res.ok) {
 					const list = await res.json();
-					console.log("📝 Home Posts: Received", list.length, "posts. Private posts:", list.filter(p => p.isPrivate).length);
-					console.log("📝 Home Posts: Post details:", list.map(p => ({id: p.id, title: p.title, isPrivate: p.isPrivate})));
+					// Handle null/undefined response
+					const posts = list || [];
+					console.log("📝 Home Posts: Received", posts.length, "posts. Private posts:", posts.filter(p => p.isPrivate).length);
+					console.log("📝 Home Posts: Post details:", posts.map(p => ({id: p.id, title: p.title, isPrivate: p.isPrivate})));
 					if (!cancelled) {
-						const sortedList = sortNotes(list);
+						const sortedList = sortNotes(posts);
 						console.log("📝 Home Posts: Setting state with", sortedList.length, "posts. Private in sorted:", sortedList.filter(p => p.isPrivate).length);
 						
 						// Mark that we just fetched with authentication if we have a token
@@ -644,10 +646,12 @@ function Home() {
 				if (cancelled) return;
 				try {
 					const list: Note[] = JSON.parse(ev.data);
-					const privatePostsInSnapshot = list.filter(p => p.isPrivate).length;
+					// Handle null/undefined response
+					const posts = list || [];
+					const privatePostsInSnapshot = posts.filter(p => p.isPrivate).length;
 					const timeSinceAuthFetch = Date.now() - lastAuthenticatedFetch.current;
 					
-					console.log("📡 SSE Snapshot: Received", list.length, "posts. Private:", privatePostsInSnapshot, "Current token:", !!token, "Time since auth fetch:", timeSinceAuthFetch + "ms");
+					console.log("📡 SSE Snapshot: Received", posts.length, "posts. Private:", privatePostsInSnapshot, "Current token:", !!token, "Time since auth fetch:", timeSinceAuthFetch + "ms");
 					
 					// If we're authenticated and recently fetched data (within 10 seconds) and the snapshot has NO private posts,
 					// this means SSE is sending public-only data - reject it
@@ -655,7 +659,7 @@ function Home() {
 						console.log("📡 SSE Snapshot: REJECTING snapshot (recently fetched authenticated data, but snapshot has no private posts)");
 					} else {
 						console.log("📡 SSE Snapshot: Accepting snapshot");
-						setPosts(sortNotes(list));
+						setPosts(sortNotes(posts));
 						setError(undefined);
 					}
 				} catch (e) {
@@ -2006,8 +2010,10 @@ function Archive() {
 				});
 				if (res.ok) {
 					const list: Note[] = await res.json();
-					console.log("📋 Archive: Received", list.length, "posts. Private posts:", list.filter(p => p.isPrivate).length);
-					const sorted = [...list].sort((a, b) => {
+					// Handle null/undefined response
+					const posts = list || [];
+					console.log("📋 Archive: Received", posts.length, "posts. Private posts:", posts.filter(p => p.isPrivate).length);
+					const sorted = [...posts].sort((a, b) => {
 						const au = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
 						const bu = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
 						return bu - au;
@@ -2015,7 +2021,13 @@ function Archive() {
 					setPosts(sorted);
 				} else {
 					console.log("📋 Archive: Failed to fetch posts:", res.status);
-					setError("Failed to load posts");
+					// Only set error for actual server errors, not empty results
+					if (res.status >= 500) {
+						setError("Failed to load posts");
+					} else {
+						// For 4xx errors or empty results, just show empty state
+						setPosts([]);
+					}
 				}
 			} catch (e) {
 				console.log("📋 Archive: Error fetching posts:", e);
