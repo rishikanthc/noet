@@ -772,35 +772,39 @@ function Home() {
 						<ul className="post-list">
 							{posts.map((p) => (
 								<li key={p.id}>
-									<a
-										href={`/posts/${p.id}`}
-										className="post-link group"
-										onContextMenu={(e) => handleRightClick(e, p.id)}
-									>
-										<span className="post-title group-underline">
-											{p.title && p.title.trim() ? p.title : "Untitled"}
-										</span>
-										{p.updatedAt && (
-											<span className="post-meta">
-												—{" "}
-												{new Date(p.updatedAt).toLocaleDateString(undefined, {
-													year: "numeric",
-													month: "long",
-													day: "numeric",
-												})}
-											</span>
-										)}
-									</a>
-									{isAuthenticated && (
-										<div style={{ marginTop: "8px" }}>
+									<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+										{isAuthenticated && (
 											<PrivacyToggle
 												postId={p.id}
 												isPrivate={p.isPrivate}
-												onToggle={handlePrivacyToggle}
+												onToggle={(id) => {
+													// Prevent the link from being followed when clicking privacy toggle
+													handlePrivacyToggle(id);
+												}}
 												isToggling={togglingPrivacy === p.id}
 											/>
-										</div>
-									)}
+										)}
+										<a
+											href={`/posts/${p.id}`}
+											className="post-link group"
+											onContextMenu={(e) => handleRightClick(e, p.id)}
+											style={{ flex: 1 }}
+										>
+											<span className="post-title group-underline">
+												{p.title && p.title.trim() ? p.title : "Untitled"}
+											</span>
+											{p.updatedAt && (
+												<span className="post-meta">
+													—{" "}
+													{new Date(p.updatedAt).toLocaleDateString(undefined, {
+														year: "numeric",
+														month: "long",
+														day: "numeric",
+													})}
+												</span>
+											)}
+										</a>
+									</div>
 								</li>
 							))}
 						</ul>
@@ -1993,35 +1997,39 @@ function Archive() {
 						<ul className="post-list">
 							{filteredPosts.map((p) => (
 								<li key={p.id}>
-									<a
-										href={`/posts/${p.id}`}
-										className="post-link group"
-										onContextMenu={(e) => handleRightClick(e, p.id)}
-									>
-										<span className="post-title group-underline">
-											{p.title && p.title.trim() ? p.title : "Untitled"}
-										</span>
-										{p.updatedAt && (
-											<span className="post-meta">
-												—{" "}
-												{new Date(p.updatedAt).toLocaleDateString(undefined, {
-													year: "numeric",
-													month: "long",
-													day: "numeric",
-												})}
-											</span>
-										)}
-									</a>
-									{isAuthenticated && (
-										<div style={{ marginTop: "8px" }}>
+									<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+										{isAuthenticated && (
 											<PrivacyToggle
 												postId={p.id}
 												isPrivate={p.isPrivate}
-												onToggle={handlePrivacyToggle}
+												onToggle={(id) => {
+													// Prevent the link from being followed when clicking privacy toggle
+													handlePrivacyToggle(id);
+												}}
 												isToggling={togglingPrivacy === p.id}
 											/>
-										</div>
-									)}
+										)}
+										<a
+											href={`/posts/${p.id}`}
+											className="post-link group"
+											onContextMenu={(e) => handleRightClick(e, p.id)}
+											style={{ flex: 1 }}
+										>
+											<span className="post-title group-underline">
+												{p.title && p.title.trim() ? p.title : "Untitled"}
+											</span>
+											{p.updatedAt && (
+												<span className="post-meta">
+													—{" "}
+													{new Date(p.updatedAt).toLocaleDateString(undefined, {
+														year: "numeric",
+														month: "long",
+														day: "numeric",
+													})}
+												</span>
+											)}
+										</a>
+									</div>
 								</li>
 							))}
 						</ul>
