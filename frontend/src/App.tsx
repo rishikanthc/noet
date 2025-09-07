@@ -1802,6 +1802,7 @@ function Archive() {
 	const [siteTitle, setSiteTitle] = useState<string>("");
 	const [heroImage, setHeroImage] = useState<string>("");
 	const [aboutEnabled, setAboutEnabled] = useState<boolean>(false);
+	const [searchQuery, setSearchQuery] = useState<string>("");
 	const [contextMenu, setContextMenu] = useState<{
 		x: number;
 		y: number;
@@ -1844,6 +1845,33 @@ function Archive() {
 		await handleDeletePost(confirmDialog.postId);
 		setConfirmDialog(null);
 	};
+
+	// Fuzzy search function
+	const fuzzySearch = useCallback((query: string, text: string): boolean => {
+		if (!query) return true;
+		
+		const queryLower = query.toLowerCase();
+		const textLower = text.toLowerCase();
+		
+		// Simple fuzzy matching: all query characters must appear in order
+		let queryIndex = 0;
+		for (let i = 0; i < textLower.length && queryIndex < queryLower.length; i++) {
+			if (textLower[i] === queryLower[queryIndex]) {
+				queryIndex++;
+			}
+		}
+		return queryIndex === queryLower.length;
+	}, []);
+
+	// Filter posts based on search query
+	const filteredPosts = useMemo(() => {
+		if (!searchQuery.trim()) return posts;
+		
+		return posts.filter(post => {
+			const title = post.title || 'Untitled';
+			return fuzzySearch(searchQuery, title);
+		});
+	}, [posts, searchQuery, fuzzySearch]);
 
 	useEffect(() => {
 		const load = async () => {
@@ -1891,28 +1919,31 @@ function Archive() {
 				aboutEnabled={aboutEnabled}
 			/>
 			<div className="home-content">
-				{heroImage && (
-					<img
-						src={heroImage}
-						alt="Hero image"
-						style={{
-							width: "150px",
-							height: "auto",
-							marginBottom: "16px",
-							borderRadius: "6px",
-						}}
-					/>
-				)}
 				<h1>Archive</h1>
+				
+				{!loading && !error && (
+					<div className="search-container">
+						<input
+							type="text"
+							placeholder="Search posts..."
+							value={searchQuery}
+							onChange={(e) => setSearchQuery(e.target.value)}
+							className="search-input"
+						/>
+					</div>
+				)}
+
 				{loading && <p>Loading…</p>}
 				{error && <p>{error}</p>}
 				{!loading &&
 					!error &&
-					(posts.length === 0 ? (
+					(filteredPosts.length === 0 && searchQuery ? (
+						<p>No posts match your search.</p>
+					) : filteredPosts.length === 0 ? (
 						<p>No posts yet.</p>
 					) : (
 						<ul className="post-list">
-							{posts.map((p) => (
+							{filteredPosts.map((p) => (
 								<li key={p.id}>
 									<a
 										href={`/posts/${p.id}`}
