@@ -47,6 +47,7 @@ type Post struct {
     Content   string    `json:"content"`
     CreatedAt time.Time `json:"createdAt"`
     UpdatedAt time.Time `json:"updatedAt"`
+    IsPrivate bool      `json:"isPrivate"`
 }
 
 type User struct {
@@ -83,6 +84,9 @@ func NewApp(dbPath string) (*App, error) {
     if err := initSchema(db); err != nil {
         return nil, err
     }
+    if err := runMigrations(db); err != nil {
+        return nil, err
+    }
 
     // Get or generate persistent JWT secret
     jwtSecret, err := getOrCreateJWTSecret(db)
@@ -108,7 +112,8 @@ CREATE TABLE IF NOT EXISTS posts (
   title TEXT NULL,
   content TEXT NOT NULL DEFAULT '',
   created_at DATETIME NOT NULL,
-  updated_at DATETIME NOT NULL
+  updated_at DATETIME NOT NULL,
+  is_private BOOLEAN NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -156,6 +161,20 @@ CREATE INDEX IF NOT EXISTS idx_post_links_source ON post_links(source_post_id);
 CREATE INDEX IF NOT EXISTS idx_post_links_target ON post_links(target_post_id);
 `)
     return err
+}
+
+func runMigrations(db *sql.DB) error {
+    // Check if is_private column exists
+    row := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('posts') WHERE name='is_private'`)
+    var count int
+    if err := row.Scan(&count); err == nil && count == 0 {
+        // Add is_private column to existing posts table
+        _, err := db.Exec(`ALTER TABLE posts ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT 0`)
+        if err != nil {
+            return fmt.Errorf("failed to add is_private column: %v", err)
+        }
+    }
+    return nil
 }
 
 func getOrCreateJWTSecret(db *sql.DB) ([]byte, error) {
@@ -808,13 +827,14 @@ func (a *App) routes() {
             // Protect post creation
             a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
                 now := time.Now()
-                res, err := a.DB.Exec(`INSERT INTO posts(title, content, created_at, updated_at) VALUES(NULL, '', ?, ?)`, now, now)
+                res, err := a.DB.Exec(`INSERT INTO posts(title, content, created_at, updated_at, is_private) VALUES(NULL, '', ?, ?, ?)`, now, now, true)
                 if err != nil {
                     http.Error(w, "db error", http.StatusInternalServerError)
                     return
                 }
                 id, _ := res.LastInsertId()
-                p := Post{ID: id, Title: nil, Content: "", CreatedAt: now, UpdatedAt: now}
+                p := Post{ID: id, Title: nil, Content: "", CreatedAt: now, UpdatedAt: now, IsPrivate: true}
+                fmt.Printf("Created new post %d: isPrivate=%t\n", id, p.IsPrivate)
                 w.Header().Set("Content-Type", "application/json")
                 w.WriteHeader(http.StatusCreated)
                 _ = json.NewEncoder(w).Encode(p)
@@ -822,28 +842,14 @@ func (a *App) routes() {
             })(w, r)
             return
         case http.MethodGet:
-            rows, err := a.DB.Query(`SELECT id, title, content, created_at, updated_at FROM posts ORDER BY updated_at DESC, created_at DESC`)
+            isAuth := a.isAuthenticated(r)
+            posts, err := a.getPostsWithPrivacy(isAuth)
             if err != nil {
                 http.Error(w, "db error", http.StatusInternalServerError)
                 return
             }
-            defer rows.Close()
-            var list []Post
-            for rows.Next() {
-                var p Post
-                var title sql.NullString
-                if err := rows.Scan(&p.ID, &title, &p.Content, &p.CreatedAt, &p.UpdatedAt); err != nil {
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                    return
-                }
-                if title.Valid {
-                    t := title.String
-                    p.Title = &t
-                }
-                list = append(list, p)
-            }
             w.Header().Set("Content-Type", "application/json")
-            _ = json.NewEncoder(w).Encode(list)
+            _ = json.NewEncoder(w).Encode(posts)
             return
         default:
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -885,6 +891,52 @@ func (a *App) routes() {
             return
         }
         
+        // Handle publish/unpublish sub-path
+        if strings.HasSuffix(path, "/publish") {
+            if r.Method != http.MethodPut {
+                http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+                return
+            }
+            
+            // Require authentication for publishing
+            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+                idStr := strings.TrimSuffix(path, "/publish")
+                
+                // Get current post to check if it exists and get current privacy state
+                p, err := a.getPost(idStr)
+                if err != nil {
+                    if errors.Is(err, sql.ErrNoRows) {
+                        http.NotFound(w, r)
+                    } else {
+                        http.Error(w, "db error", http.StatusInternalServerError)
+                    }
+                    return
+                }
+                
+                // Toggle privacy state
+                newPrivate := !p.IsPrivate
+                now := time.Now()
+                
+                _, err = a.DB.Exec(`UPDATE posts SET is_private = ?, updated_at = ? WHERE id = ?`, newPrivate, now, idStr)
+                if err != nil {
+                    http.Error(w, "db error", http.StatusInternalServerError)
+                    return
+                }
+                
+                // Get updated post
+                updatedPost, err := a.getPost(idStr)
+                if err != nil {
+                    http.Error(w, "db error", http.StatusInternalServerError)
+                    return
+                }
+                
+                w.Header().Set("Content-Type", "application/json")
+                _ = json.NewEncoder(w).Encode(updatedPost)
+                go a.broadcast("post-updated", updatedPost)
+            })(w, r)
+            return
+        }
+        
         // Regular individual post operations
         idStr := path
         switch r.Method {
@@ -898,6 +950,14 @@ func (a *App) routes() {
                 }
                 return
             }
+            
+            // Check if post is private and user is not authenticated
+            isAuth := a.isAuthenticated(r)
+            if p.IsPrivate && !isAuth {
+                http.NotFound(w, r)
+                return
+            }
+            
             w.Header().Set("Content-Type", "application/json")
             _ = json.NewEncoder(w).Encode(p)
             return
@@ -1145,22 +1205,10 @@ func (a *App) routes() {
         defer a.removeClient(id)
 
         // snapshot
-        rows, err := a.DB.Query(`SELECT id, title, content, created_at, updated_at FROM posts ORDER BY updated_at DESC, created_at DESC`)
+        isAuth := a.isAuthenticated(r)
+        posts, err := a.getPostsWithPrivacy(isAuth)
         if err == nil {
-            var list []Post
-            for rows.Next() {
-                var p Post
-                var title sql.NullString
-                if err := rows.Scan(&p.ID, &title, &p.Content, &p.CreatedAt, &p.UpdatedAt); err == nil {
-                    if title.Valid {
-                        t := title.String
-                        p.Title = &t
-                    }
-                    list = append(list, p)
-                }
-            }
-            _ = rows.Close()
-            b, _ := json.Marshal(list)
+            b, _ := json.Marshal(posts)
             _, _ = w.Write([]byte(fmt.Sprintf("event: snapshot\ndata: %s\n\n", string(b))))
             flusher.Flush()
         }
@@ -1314,11 +1362,23 @@ func (a *App) broadcast(event string, v any) {
     a.clientsMu.Unlock()
 }
 
+func (a *App) isAuthenticated(r *http.Request) bool {
+    authHeader := r.Header.Get("Authorization")
+    if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+        return false
+    }
+    tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+    _, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+        return a.JWTSecret, nil
+    })
+    return err == nil
+}
+
 func (a *App) getPost(idStr string) (Post, error) {
     var p Post
     var title sql.NullString
-    row := a.DB.QueryRow(`SELECT id, title, content, created_at, updated_at FROM posts WHERE id = ?`, idStr)
-    err := row.Scan(&p.ID, &title, &p.Content, &p.CreatedAt, &p.UpdatedAt)
+    row := a.DB.QueryRow(`SELECT id, title, content, created_at, updated_at, is_private FROM posts WHERE id = ?`, idStr)
+    err := row.Scan(&p.ID, &title, &p.Content, &p.CreatedAt, &p.UpdatedAt, &p.IsPrivate)
     if err != nil {
         return Post{}, err
     }
@@ -1327,4 +1387,34 @@ func (a *App) getPost(idStr string) (Post, error) {
         p.Title = &t
     }
     return p, nil
+}
+
+func (a *App) getPostsWithPrivacy(isAuthenticated bool) ([]Post, error) {
+    var query string
+    if isAuthenticated {
+        query = `SELECT id, title, content, created_at, updated_at, is_private FROM posts ORDER BY updated_at DESC, created_at DESC`
+    } else {
+        query = `SELECT id, title, content, created_at, updated_at, is_private FROM posts WHERE is_private = 0 ORDER BY updated_at DESC, created_at DESC`
+    }
+    
+    rows, err := a.DB.Query(query)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+    
+    var posts []Post
+    for rows.Next() {
+        var p Post
+        var title sql.NullString
+        if err := rows.Scan(&p.ID, &title, &p.Content, &p.CreatedAt, &p.UpdatedAt, &p.IsPrivate); err != nil {
+            return nil, err
+        }
+        if title.Valid {
+            t := title.String
+            p.Title = &t
+        }
+        posts = append(posts, p)
+    }
+    return posts, nil
 }

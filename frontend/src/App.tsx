@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Editor, type EditorRef, type MentionItem, getPresetById } from "textforge";
 import "./styles.css";
+import { PrivacyToggle } from "./PrivacyToggle";
 
 type Note = {
 	id: number;
@@ -16,6 +17,7 @@ type Note = {
 	content?: string;
 	createdAt?: string;
 	updatedAt?: string;
+	isPrivate: boolean;
 };
 
 type User = {
@@ -535,6 +537,30 @@ function Home() {
 		postId: number;
 		title: string;
 	} | null>(null);
+	const [togglingPrivacy, setTogglingPrivacy] = useState<number | null>(null);
+
+	const handlePrivacyToggle = useCallback(async (postId: number) => {
+		if (!isAuthenticated || !token) return;
+		
+		setTogglingPrivacy(postId);
+		try {
+			const res = await fetch(`/api/posts/${postId}/publish`, {
+				method: 'PUT',
+				headers: { Authorization: `Bearer ${token}` },
+			});
+			
+			if (res.ok) {
+				const updatedPost = await res.json();
+				setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+			} else {
+				console.error('Failed to toggle privacy');
+			}
+		} catch (error) {
+			console.error('Error toggling privacy:', error);
+		} finally {
+			setTogglingPrivacy(null);
+		}
+	}, [isAuthenticated, token]);
 
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
@@ -567,7 +593,9 @@ function Home() {
 		// Fallback initial load in case SSE is blocked
 		(async () => {
 			try {
-				const res = await fetch("/api/posts");
+				const res = await fetch("/api/posts", {
+					headers: token ? { Authorization: `Bearer ${token}` } : {}
+				});
 				if (res.ok) {
 					const list = await res.json();
 					if (!cancelled) setPosts(sortNotes(list));
@@ -763,6 +791,16 @@ function Home() {
 											</span>
 										)}
 									</a>
+									{isAuthenticated && (
+										<div style={{ marginTop: "8px" }}>
+											<PrivacyToggle
+												postId={p.id}
+												isPrivate={p.isPrivate}
+												onToggle={handlePrivacyToggle}
+												isToggling={togglingPrivacy === p.id}
+											/>
+										</div>
+									)}
 								</li>
 							))}
 						</ul>
@@ -1224,7 +1262,9 @@ function PostEditor({ id }: { id: string }) {
 		setBacklinksLoading(true);
 		console.log("Loading backlinks for post:", id);
 		try {
-			const res = await fetch(`/api/posts/${id}/backlinks`);
+			const res = await fetch(`/api/posts/${id}/backlinks`, {
+				headers: token ? { Authorization: `Bearer ${token}` } : {}
+			});
 			console.log("Backlinks response status:", res.status);
 			if (res.ok) {
 				const backlinksData: Note[] = await res.json();
@@ -1290,7 +1330,9 @@ function PostEditor({ id }: { id: string }) {
 		let cancelled = false;
 		const load = async () => {
 			try {
-				const res = await fetch(`/api/posts/${id}`);
+				const res = await fetch(`/api/posts/${id}`, {
+					headers: token ? { Authorization: `Bearer ${token}` } : {}
+				});
 				if (!res.ok) throw new Error(`Failed to load note: ${res.status}`);
 				const note = await res.json();
 				if (!cancelled) {
@@ -1327,7 +1369,9 @@ function PostEditor({ id }: { id: string }) {
 
 		const loadPostMentions = async () => {
 			try {
-				const res = await fetch("/api/posts");
+				const res = await fetch("/api/posts", {
+					headers: token ? { Authorization: `Bearer ${token}` } : {}
+				});
 				if (res.ok) {
 					const posts: Note[] = await res.json();
 					// Convert posts to mention items, excluding current post
@@ -1650,7 +1694,9 @@ function AboutMe() {
 
 		const loadPostMentions = async () => {
 			try {
-				const res = await fetch("/api/posts");
+				const res = await fetch("/api/posts", {
+					headers: token ? { Authorization: `Bearer ${token}` } : {}
+				});
 				if (res.ok) {
 					const posts: Note[] = await res.json();
 					// Convert posts to mention items for About Me page
@@ -1876,7 +1922,9 @@ function Archive() {
 	useEffect(() => {
 		const load = async () => {
 			try {
-				const res = await fetch("/api/posts");
+				const res = await fetch("/api/posts", {
+					headers: token ? { Authorization: `Bearer ${token}` } : {}
+				});
 				if (res.ok) {
 					const list: Note[] = await res.json();
 					const sorted = [...list].sort((a, b) => {
@@ -1964,6 +2012,16 @@ function Archive() {
 											</span>
 										)}
 									</a>
+									{isAuthenticated && (
+										<div style={{ marginTop: "8px" }}>
+											<PrivacyToggle
+												postId={p.id}
+												isPrivate={p.isPrivate}
+												onToggle={handlePrivacyToggle}
+												isToggling={togglingPrivacy === p.id}
+											/>
+										</div>
+									)}
 								</li>
 							))}
 						</ul>
