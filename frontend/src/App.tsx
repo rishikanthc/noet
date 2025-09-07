@@ -1911,6 +1911,30 @@ function Archive() {
 		postId: number;
 		title: string;
 	} | null>(null);
+	const [togglingPrivacy, setTogglingPrivacy] = useState<number | null>(null);
+
+	const handlePrivacyToggle = useCallback(async (postId: number) => {
+		if (!isAuthenticated || !token) return;
+		
+		setTogglingPrivacy(postId);
+		try {
+			const res = await fetch(`/api/posts/${postId}/publish`, {
+				method: 'PUT',
+				headers: { Authorization: `Bearer ${token}` },
+			});
+			
+			if (res.ok) {
+				const updatedPost = await res.json();
+				setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+			} else {
+				console.error('Failed to toggle privacy');
+			}
+		} catch (error) {
+			console.error('Privacy toggle error:', error);
+		} finally {
+			setTogglingPrivacy(null);
+		}
+	}, [isAuthenticated, token]);
 
 	const handleDeletePost = async (postId: number) => {
 		if (!isAuthenticated || !token) return;
