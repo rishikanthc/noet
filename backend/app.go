@@ -915,9 +915,8 @@ func (a *App) routes() {
                 
                 // Toggle privacy state
                 newPrivate := !p.IsPrivate
-                now := time.Now()
                 
-                _, err = a.DB.Exec(`UPDATE posts SET is_private = ?, updated_at = ? WHERE id = ?`, newPrivate, now, idStr)
+                _, err = a.DB.Exec(`UPDATE posts SET is_private = ? WHERE id = ?`, newPrivate, idStr)
                 if err != nil {
                     http.Error(w, "db error", http.StatusInternalServerError)
                     return

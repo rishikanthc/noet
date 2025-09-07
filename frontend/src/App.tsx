@@ -51,18 +51,23 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [refreshTokenValue, setRefreshTokenValue] = useState<string | null>(null);
 
 	useEffect(() => {
+		console.log("🔐 Auth useEffect: Starting authentication check");
 		// Check for existing tokens in localStorage
 		const savedToken = localStorage.getItem("auth_token");
 		const savedRefreshToken = localStorage.getItem("refresh_token");
+		console.log("🔐 Auth useEffect: savedToken exists:", !!savedToken, "savedRefreshToken exists:", !!savedRefreshToken);
 		
 		if (savedToken) {
+			console.log("🔐 Auth useEffect: Validating token...");
 			// Validate token
 			fetch("/api/auth/validate", {
 				headers: { Authorization: `Bearer ${savedToken}` },
 			})
 				.then((res) => res.json())
 				.then((data) => {
+					console.log("🔐 Auth useEffect: Token validation result:", data.valid);
 					if (data.valid) {
+						console.log("🔐 Auth useEffect: Setting authenticated state");
 						setToken(savedToken);
 						setUser(data.user);
 						if (savedRefreshToken) {
@@ -523,6 +528,15 @@ function Home() {
 	const [posts, setPosts] = useState<Note[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
+	
+	// Ref to track if we've recently fetched authenticated posts
+	const lastAuthenticatedFetch = useRef<number>(0);
+	
+	// Debug logging for posts state changes
+	useEffect(() => {
+		console.log("📝 Home Posts State: Posts updated. Total:", posts.length, "Private:", posts.filter(p => p.isPrivate).length);
+		console.log("📝 Home Posts State: Post IDs:", posts.map(p => `${p.id}(${p.isPrivate ? 'P' : 'Pub'})`));
+	}, [posts]);
 	const [intro, setIntro] = useState<string>("");
 	const [siteTitle, setSiteTitle] = useState<string>("");
 	const [heroImage, setHeroImage] = useState<string>("");
@@ -572,6 +586,7 @@ function Home() {
 	}, []);
 
 	useEffect(() => {
+		console.log("📝 Home Posts useEffect: Starting, token:", !!token);
 		let cancelled = false;
 		const sortNotes = (arr: Note[]) =>
 			[...arr].sort((a, b) => {
@@ -593,14 +608,32 @@ function Home() {
 		// Fallback initial load in case SSE is blocked
 		(async () => {
 			try {
+				console.log("📝 Home Posts: Fetching posts with auth:", !!token);
 				const res = await fetch("/api/posts", {
 					headers: token ? { Authorization: `Bearer ${token}` } : {}
 				});
 				if (res.ok) {
 					const list = await res.json();
-					if (!cancelled) setPosts(sortNotes(list));
+					console.log("📝 Home Posts: Received", list.length, "posts. Private posts:", list.filter(p => p.isPrivate).length);
+					console.log("📝 Home Posts: Post details:", list.map(p => ({id: p.id, title: p.title, isPrivate: p.isPrivate})));
+					if (!cancelled) {
+						const sortedList = sortNotes(list);
+						console.log("📝 Home Posts: Setting state with", sortedList.length, "posts. Private in sorted:", sortedList.filter(p => p.isPrivate).length);
+						
+						// Mark that we just fetched with authentication if we have a token
+						if (token) {
+							lastAuthenticatedFetch.current = Date.now();
+							console.log("📝 Home Posts: Marked authenticated fetch at", lastAuthenticatedFetch.current);
+						}
+						
+						setPosts(sortedList);
+					}
+				} else {
+					console.log("📝 Home Posts: Failed to fetch posts:", res.status);
 				}
-			} catch {}
+			} catch (e) {
+				console.log("📝 Home Posts: Error fetching posts:", e);
+			}
 		})();
 
 		// Connect to SSE for live updates
@@ -611,8 +644,20 @@ function Home() {
 				if (cancelled) return;
 				try {
 					const list: Note[] = JSON.parse(ev.data);
-					setPosts(sortNotes(list));
-					setError(undefined);
+					const privatePostsInSnapshot = list.filter(p => p.isPrivate).length;
+					const timeSinceAuthFetch = Date.now() - lastAuthenticatedFetch.current;
+					
+					console.log("📡 SSE Snapshot: Received", list.length, "posts. Private:", privatePostsInSnapshot, "Current token:", !!token, "Time since auth fetch:", timeSinceAuthFetch + "ms");
+					
+					// If we're authenticated and recently fetched data (within 10 seconds) and the snapshot has NO private posts,
+					// this means SSE is sending public-only data - reject it
+					if (token && timeSinceAuthFetch < 10000 && privatePostsInSnapshot === 0) {
+						console.log("📡 SSE Snapshot: REJECTING snapshot (recently fetched authenticated data, but snapshot has no private posts)");
+					} else {
+						console.log("📡 SSE Snapshot: Accepting snapshot");
+						setPosts(sortNotes(list));
+						setError(undefined);
+					}
 				} catch (e) {
 					console.error("snapshot parse error", e);
 				} finally {
@@ -657,7 +702,7 @@ function Home() {
 			cancelled = true;
 			if (es) es.close();
 		};
-	}, []);
+	}, [token]);
 
 	useEffect(() => {
 		// Load settings from API
@@ -764,6 +809,10 @@ function Home() {
 				<h1>Latest</h1>
 				{loading && <p>Loading…</p>}
 				{error && <p>{error}</p>}
+				{(() => {
+					console.log("📝 Home Render: About to render. Posts:", posts.length, "Private:", posts.filter(p => p.isPrivate).length, "Loading:", loading, "Error:", error, "IsAuthenticated:", isAuthenticated);
+					return null;
+				})()}
 				{!loading &&
 					!error &&
 					(posts.length === 0 ? (
@@ -1924,13 +1973,16 @@ function Archive() {
 	}, [posts, searchQuery, fuzzySearch]);
 
 	useEffect(() => {
+		console.log("📋 Archive useEffect: Starting, token:", !!token);
 		const load = async () => {
 			try {
+				console.log("📋 Archive: Fetching posts with auth:", !!token);
 				const res = await fetch("/api/posts", {
 					headers: token ? { Authorization: `Bearer ${token}` } : {}
 				});
 				if (res.ok) {
 					const list: Note[] = await res.json();
+					console.log("📋 Archive: Received", list.length, "posts. Private posts:", list.filter(p => p.isPrivate).length);
 					const sorted = [...list].sort((a, b) => {
 						const au = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
 						const bu = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
@@ -1938,9 +1990,11 @@ function Archive() {
 					});
 					setPosts(sorted);
 				} else {
+					console.log("📋 Archive: Failed to fetch posts:", res.status);
 					setError("Failed to load posts");
 				}
 			} catch (e) {
+				console.log("📋 Archive: Error fetching posts:", e);
 				setError("Failed to load posts");
 			} finally {
 				setLoading(false);
@@ -1959,7 +2013,7 @@ function Archive() {
 		};
 		load();
 		loadTitle();
-	}, []);
+	}, [token]);
 
 	return (
 		<div className="home-container">
