@@ -1580,6 +1580,46 @@ func (a *App) routes() {
         }
     })
 
+    // AI models endpoint
+    mux.HandleFunc("/api/ai/models", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+
+        // Protect AI endpoint
+        a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+            // Get OpenAI API key from settings
+            var apiKey string
+            err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, "openai_api_key").Scan(&apiKey)
+            if err != nil {
+                if errors.Is(err, sql.ErrNoRows) {
+                    http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
+                    return
+                }
+                http.Error(w, "database error", http.StatusInternalServerError)
+                return
+            }
+            
+            if apiKey == "" {
+                http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
+                return
+            }
+            
+            // Fetch models from OpenAI API
+            models, err := a.fetchOpenAIModels(apiKey)
+            if err != nil {
+                http.Error(w, fmt.Sprintf("Failed to fetch models: %v", err), http.StatusInternalServerError)
+                return
+            }
+            
+            w.Header().Set("Content-Type", "application/json")
+            json.NewEncoder(w).Encode(map[string]interface{}{
+                "models": models,
+            })
+        })(w, r)
+    })
+
     // AI editing endpoint
     mux.HandleFunc("/api/ai/edit", func(w http.ResponseWriter, r *http.Request) {
         if r.Method != http.MethodPost {
@@ -1593,6 +1633,7 @@ func (a *App) routes() {
             var req struct {
                 SelectedText string `json:"selectedText"`
                 UserPrompt   string `json:"userPrompt"`
+                Model        string `json:"model,omitempty"`
             }
             
             if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -1622,8 +1663,14 @@ func (a *App) routes() {
                 return
             }
             
+            // Default to gpt-4 if no model specified
+            model := req.Model
+            if model == "" {
+                model = "gpt-4"
+            }
+            
             // Call OpenAI API
-            response, err := a.callOpenAI(apiKey, req.SelectedText, req.UserPrompt)
+            response, err := a.callOpenAI(apiKey, req.SelectedText, req.UserPrompt, model)
             if err != nil {
                 http.Error(w, fmt.Sprintf("AI processing failed: %v", err), http.StatusInternalServerError)
                 return
@@ -1793,8 +1840,54 @@ func (a *App) getPostsWithPrivacy(isAuthenticated bool) ([]Post, error) {
     return posts, nil
 }
 
+// fetchOpenAIModels fetches available models from OpenAI API
+func (a *App) fetchOpenAIModels(apiKey string) ([]map[string]interface{}, error) {
+    // Create HTTP request
+    req, err := http.NewRequest("GET", "https://api.openai.com/v1/models", nil)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create request: %w", err)
+    }
+    
+    req.Header.Set("Authorization", "Bearer "+apiKey)
+    
+    // Make the request
+    client := &http.Client{Timeout: 10 * time.Second}
+    resp, err := client.Do(req)
+    if err != nil {
+        return nil, fmt.Errorf("request failed: %w", err)
+    }
+    defer resp.Body.Close()
+    
+    if resp.StatusCode != http.StatusOK {
+        body, _ := io.ReadAll(resp.Body)
+        return nil, fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
+    }
+    
+    // Parse response
+    var response struct {
+        Data []map[string]interface{} `json:"data"`
+    }
+    
+    if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+        return nil, fmt.Errorf("failed to decode response: %w", err)
+    }
+    
+    // Filter for chat completion models and sort by relevance
+    var chatModels []map[string]interface{}
+    for _, model := range response.Data {
+        if id, ok := model["id"].(string); ok {
+            // Include GPT models and other chat completion models
+            if strings.HasPrefix(id, "gpt-") || strings.Contains(id, "chat") {
+                chatModels = append(chatModels, model)
+            }
+        }
+    }
+    
+    return chatModels, nil
+}
+
 // callOpenAI makes a request to OpenAI's API for text editing
-func (a *App) callOpenAI(apiKey, selectedText, userPrompt string) (string, error) {
+func (a *App) callOpenAI(apiKey, selectedText, userPrompt, model string) (string, error) {
     // System prompt designed to return clean markdown without code fences
     systemPrompt := `You are a professional text editor. Your task is to improve the provided text according to the user's instructions.
 
@@ -1808,7 +1901,7 @@ IMPORTANT RULES:
 
     // Prepare the request payload for OpenAI API
     payload := map[string]interface{}{
-        "model": "gpt-4",
+        "model": model,
         "messages": []map[string]string{
             {
                 "role":    "system",
@@ -1819,8 +1912,6 @@ IMPORTANT RULES:
                 "content": fmt.Sprintf("Original text:\n%s\n\nUser instruction: %s", selectedText, userPrompt),
             },
         },
-        "max_tokens":    2000,
-        "temperature":   0.3,
     }
     
     payloadBytes, err := json.Marshal(payload)

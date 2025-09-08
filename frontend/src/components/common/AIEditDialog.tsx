@@ -1,11 +1,12 @@
 import { useState, useEffect, memo } from 'react';
+import { useAIModels } from '../../hooks/useAIModels';
 
 interface AIEditDialogProps {
 	isOpen: boolean;
 	selectedText: string;
 	onClose: () => void;
 	onApply: (editedText: string) => void;
-	onEdit: (userPrompt: string) => Promise<string>;
+	onEdit: (userPrompt: string, model?: string) => Promise<string>;
 }
 
 export const AIEditDialog = memo<AIEditDialogProps>(function AIEditDialog({
@@ -16,10 +17,12 @@ export const AIEditDialog = memo<AIEditDialogProps>(function AIEditDialog({
 	onEdit,
 }) {
 	const [userPrompt, setUserPrompt] = useState('');
+	const [selectedModel, setSelectedModel] = useState('gpt-4');
 	const [editedText, setEditedText] = useState('');
 	const [isLoading, setIsLoading] = useState(false);
 	const [error, setError] = useState('');
 	const [showPreview, setShowPreview] = useState(false);
+	const { models, isLoading: modelsLoading, error: modelsError } = useAIModels();
 
 	useEffect(() => {
 		if (isOpen) {
@@ -49,7 +52,7 @@ export const AIEditDialog = memo<AIEditDialogProps>(function AIEditDialog({
 		setError('');
 		
 		try {
-			const result = await onEdit(userPrompt.trim());
+			const result = await onEdit(userPrompt.trim(), selectedModel);
 			setEditedText(result);
 			setShowPreview(true);
 		} catch (err: any) {
@@ -131,6 +134,53 @@ export const AIEditDialog = memo<AIEditDialogProps>(function AIEditDialog({
 
 				{!showPreview ? (
 					<>
+						{/* Model selection */}
+						<div style={{ marginBottom: '16px' }}>
+							<label style={{ 
+								display: 'block', 
+								fontSize: '12px', 
+								fontWeight: 500,
+								color: '#666',
+								marginBottom: '6px',
+								textTransform: 'uppercase',
+								letterSpacing: '0.5px'
+							}}>
+								AI Model
+							</label>
+							<select
+								value={selectedModel}
+								onChange={(e) => setSelectedModel(e.target.value)}
+								disabled={isLoading || modelsLoading}
+								style={{
+									width: '100%',
+									fontFamily: 'Inter, system-ui, sans-serif',
+									fontSize: '14px',
+									padding: '12px',
+									boxSizing: 'border-box',
+									border: '1px solid #d1d5db',
+									borderRadius: '6px',
+									background: 'white',
+									cursor: isLoading || modelsLoading ? 'not-allowed' : 'pointer'
+								}}
+							>
+								<option value="gpt-4">GPT-4 (Default)</option>
+								{models.map((model) => (
+									<option key={model.id} value={model.id}>
+										{model.id}
+									</option>
+								))}
+							</select>
+							{modelsError && (
+								<div style={{
+									fontSize: '12px',
+									color: '#dc2626',
+									marginTop: '4px'
+								}}>
+									Failed to load models: {modelsError}
+								</div>
+							)}
+						</div>
+
 						{/* Prompt input */}
 						<div style={{ marginBottom: '16px' }}>
 							<label style={{ 

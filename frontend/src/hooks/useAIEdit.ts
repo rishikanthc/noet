@@ -5,7 +5,7 @@ export function useAIEdit() {
 	const { token } = useAuth();
 	const [isProcessing, setIsProcessing] = useState(false);
 
-	const editText = useCallback(async (selectedText: string, userPrompt: string): Promise<string> => {
+	const editText = useCallback(async (selectedText: string, userPrompt: string, model?: string): Promise<string> => {
 		if (!token) {
 			throw new Error('Authentication required');
 		}
@@ -21,6 +21,7 @@ export function useAIEdit() {
 				body: JSON.stringify({
 					selectedText,
 					userPrompt,
+					model,
 				}),
 			});
 

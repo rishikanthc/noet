@@ -152,9 +152,9 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 			setSavedSelection(null); // Clear saved selection when dialog closes
 		}, []);
 
-		const handleEditText = useCallback(async (userPrompt: string) => {
+		const handleEditText = useCallback(async (userPrompt: string, model?: string) => {
 			if (!savedSelection) throw new Error('No text selected');
-			return await editText(savedSelection.text, userPrompt);
+			return await editText(savedSelection.text, userPrompt, model);
 		}, [savedSelection, editText]);
 
 		useEffect(() => {
