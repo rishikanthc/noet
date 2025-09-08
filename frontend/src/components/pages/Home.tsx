@@ -38,11 +38,6 @@ export function Home() {
 		return () => window.removeEventListener("keydown", onKey);
 	}, []);
 
-	// Debug logging for posts state changes
-	useEffect(() => {
-		console.log("📝 Home Posts State: Posts updated. Total:", posts.length, "Private:", posts.filter(p => p.isPrivate).length);
-		console.log("📝 Home Posts State: Post IDs:", posts.map(p => `${p.id}(${p.isPrivate ? 'P' : 'Pub'})`));
-	}, [posts]);
 
 	const handleNewPost = useCallback(async () => {
 		if (creating || !isAuthenticated) return;
@@ -56,7 +51,6 @@ export function Home() {
 			const note = await res.json();
 			window.location.assign(`/posts/${note.id}`);
 		} catch (e) {
-			console.error(e);
 			alert("Failed to create a new post");
 		} finally {
 			setCreating(false);
@@ -80,10 +74,6 @@ export function Home() {
 		setConfirmDialog(null);
 	}, [confirmDialog, deletePost]);
 
-	const debugRender = useMemo(() => {
-		console.log("📝 Home Render: About to render. Posts:", posts.length, "Private:", posts.filter(p => p.isPrivate).length, "Loading:", loading, "Error:", error, "IsAuthenticated:", isAuthenticated);
-		return null;
-	}, [posts.length, posts.filter(p => p.isPrivate).length, loading, error, isAuthenticated]);
 
 	return (
 		<div className="home-container">
@@ -119,7 +109,6 @@ export function Home() {
 				<h1>Latest</h1>
 				{loading && <p>Loading…</p>}
 				{error && <p>{error}</p>}
-				{debugRender}
 				{!loading &&
 					!error &&
 					(posts.length === 0 ? (

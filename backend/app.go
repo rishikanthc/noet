@@ -406,16 +406,9 @@ func extractTitleFromHTML(htmlStr string) string {
 // extractMentionsFromHTML extracts mention links from HTML content
 // Returns a slice of target post IDs that are mentioned
 func extractMentionsFromHTML(htmlStr string) []int64 {
-    fmt.Printf("Extracting mentions from HTML: %s\n", htmlStr)
-    
     // Regex to find mention links with both data-mention-id and data-link-type="bidirectional" in any order
     re := regexp.MustCompile(`<a[^>]*class="mention"[^>]*data-mention-id="(\d+)"[^>]*>`)
     matches := re.FindAllStringSubmatch(htmlStr, -1)
-    
-    fmt.Printf("Regex matches found: %d\n", len(matches))
-    for i, match := range matches {
-        fmt.Printf("Match %d: %v\n", i, match)
-    }
     
     var mentionIDs []int64
     for _, match := range matches {
@@ -426,7 +419,6 @@ func extractMentionsFromHTML(htmlStr string) []int64 {
         }
     }
     
-    fmt.Printf("Extracted mention IDs: %v\n", mentionIDs)
     return mentionIDs
 }
 
@@ -835,7 +827,6 @@ func (a *App) routes() {
                 }
                 id, _ := res.LastInsertId()
                 p := Post{ID: id, Title: nil, Content: "", CreatedAt: now, UpdatedAt: now, IsPrivate: true}
-                fmt.Printf("Created new post %d: isPrivate=%t\n", id, p.IsPrivate)
                 w.Header().Set("Content-Type", "application/json")
                 w.WriteHeader(http.StatusCreated)
                 _ = json.NewEncoder(w).Encode(p)
@@ -985,8 +976,7 @@ func (a *App) routes() {
                 // Parse post ID and update bi-directional links
                 if postID, parseErr := strconv.ParseInt(idStr, 10, 64); parseErr == nil {
                     if linkErr := a.updatePostLinks(postID, payload.Content); linkErr != nil {
-                        // Log the error but don't fail the request
-                        fmt.Printf("Warning: failed to update post links for post %d: %v\n", postID, linkErr)
+                        // Silently ignore link update errors to not fail the request
                     }
                 }
                 

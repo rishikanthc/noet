@@ -32,22 +32,17 @@ export function PostEditor({ id }: PostEditorProps) {
 
 	const loadBacklinks = useCallback(async () => {
 		setBacklinksLoading(true);
-		console.log("Loading backlinks for post:", id);
 		try {
 			const res = await fetch(`/api/posts/${id}/backlinks`, {
 				headers: token ? { Authorization: `Bearer ${token}` } : {}
 			});
-			console.log("Backlinks response status:", res.status);
 			if (res.ok) {
 				const backlinksData: Note[] = await res.json();
-				console.log("Backlinks data:", backlinksData);
 				setBacklinks(backlinksData);
 			} else {
-				console.error("Failed to fetch backlinks:", res.status, res.statusText);
 				setBacklinks([]);
 			}
 		} catch (e) {
-			console.error("Failed to load backlinks:", e);
 			setBacklinks([]);
 		} finally {
 			setBacklinksLoading(false);
@@ -91,7 +86,6 @@ export function PostEditor({ id }: PostEditorProps) {
 			const note = await res.json();
 			window.location.assign(`/posts/${note.id}`);
 		} catch (e) {
-			console.error(e);
 			alert("Failed to create a new post");
 		} finally {
 			setCreating(false);
@@ -113,7 +107,6 @@ export function PostEditor({ id }: PostEditorProps) {
 					setDirty(false);
 				}
 			} catch (e: any) {
-				console.error(e);
 				if (!cancelled) setError(e?.message || "Failed to load note");
 			} finally {
 				if (!cancelled) setLoading(false);
@@ -144,11 +137,9 @@ export function PostEditor({ id }: PostEditorProps) {
 						}));
 					setPostMentions(mentions);
 				} else {
-					console.error("Failed to fetch posts for mentions:", res.status, res.statusText);
 					setPostMentions([]);
 				}
 			} catch (e) {
-				console.error("Failed to load posts for mentions:", e);
 				setPostMentions([]);
 			} finally {
 				setMentionsLoaded(true);
@@ -225,7 +216,6 @@ export function PostEditor({ id }: PostEditorProps) {
 												// Refresh backlinks after save
 												loadBacklinks();
 											} catch (e) {
-												console.error(e);
 												// keep dirty = true so the dot stays visible
 											}
 										}
@@ -236,7 +226,6 @@ export function PostEditor({ id }: PostEditorProps) {
 					</div>
 					
 					{/* Backlinks section */}
-					{console.log("Backlinks render check:", { backlinks, length: backlinks?.length })}
 					{backlinks && backlinks.length > 0 && (
 						<div className="backlinks-section" style={{ 
 							maxWidth: 800, 

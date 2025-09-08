@@ -29,7 +29,6 @@ export function Settings() {
 					setAiEnabled(data.ai_enabled === "true");
 				}
 			} catch (e) {
-				console.error("Failed to load settings:", e);
 			} finally {
 				setLoading(false);
 			}
@@ -61,7 +60,6 @@ export function Settings() {
 			const data = await response.json();
 			setHeroImage(data.url);
 		} catch (e: any) {
-			console.error("Image upload error:", e);
 			alert(`Failed to upload image: ${e.message}`);
 		} finally {
 			setUploading(false);
@@ -73,10 +71,7 @@ export function Settings() {
 		setSaving(true);
 
 		try {
-			console.log("Saving settings...", { introText, siteTitle });
-
 			// Save introduction text
-			console.log("Saving intro text...");
 			const introRes = await fetch("/api/settings", {
 				method: "PUT",
 				headers: {
@@ -88,17 +83,14 @@ export function Settings() {
 
 			if (!introRes.ok) {
 				const errorText = await introRes.text();
-				console.error("Failed to save intro text:", introRes.status, errorText);
 				throw new Error(
 					`Failed to save introduction text: ${introRes.status} - ${errorText}`,
 				);
 			}
 
 			const introResult = await introRes.json();
-			console.log("Intro text saved successfully:", introResult);
 
 			// Save site title
-			console.log("Saving site title...");
 			const titleRes = await fetch("/api/settings", {
 				method: "PUT",
 				headers: {
@@ -110,18 +102,15 @@ export function Settings() {
 
 			if (!titleRes.ok) {
 				const errorText = await titleRes.text();
-				console.error("Failed to save site title:", titleRes.status, errorText);
 				throw new Error(
 					`Failed to save site title: ${titleRes.status} - ${errorText}`,
 				);
 			}
 
 			const titleResult = await titleRes.json();
-			console.log("Site title saved successfully:", titleResult);
 
 			// Save hero image URL
 			if (heroImage !== undefined) {
-				console.log("Saving hero image...");
 				const heroRes = await fetch("/api/settings", {
 					method: "PUT",
 					headers: {
@@ -133,18 +122,15 @@ export function Settings() {
 
 				if (!heroRes.ok) {
 					const errorText = await heroRes.text();
-					console.error("Failed to save hero image:", heroRes.status, errorText);
 					throw new Error(
 						`Failed to save hero image: ${heroRes.status} - ${errorText}`,
 					);
 				}
 
 				const heroResult = await heroRes.json();
-				console.log("Hero image saved successfully:", heroResult);
 			}
 
 			// Save about enabled setting
-			console.log("Saving about enabled setting...");
 			const aboutRes = await fetch("/api/settings", {
 				method: "PUT",
 				headers: {
@@ -156,17 +142,14 @@ export function Settings() {
 
 			if (!aboutRes.ok) {
 				const errorText = await aboutRes.text();
-				console.error("Failed to save about enabled:", aboutRes.status, errorText);
 				throw new Error(
 					`Failed to save about enabled: ${aboutRes.status} - ${errorText}`,
 				);
 			}
 
 			const aboutResult = await aboutRes.json();
-			console.log("About enabled saved successfully:", aboutResult);
 
 			// Save AI settings
-			console.log("Saving AI settings...");
 			const aiEnabledRes = await fetch("/api/settings", {
 				method: "PUT",
 				headers: {
@@ -178,7 +161,6 @@ export function Settings() {
 
 			if (!aiEnabledRes.ok) {
 				const errorText = await aiEnabledRes.text();
-				console.error("Failed to save AI enabled:", aiEnabledRes.status, errorText);
 				throw new Error(
 					`Failed to save AI enabled: ${aiEnabledRes.status} - ${errorText}`,
 				);
@@ -186,7 +168,6 @@ export function Settings() {
 
 			// Save OpenAI API key if provided
 			if (openaiApiKey.trim()) {
-				console.log("Saving OpenAI API key...");
 				const apiKeyRes = await fetch("/api/settings", {
 					method: "PUT",
 					headers: {
@@ -198,17 +179,14 @@ export function Settings() {
 
 				if (!apiKeyRes.ok) {
 					const errorText = await apiKeyRes.text();
-					console.error("Failed to save OpenAI API key:", apiKeyRes.status, errorText);
 					throw new Error(
 						`Failed to save OpenAI API key: ${apiKeyRes.status} - ${errorText}`,
 					);
 				}
 			}
 
-			console.log("All settings saved successfully, redirecting...");
 			window.location.assign("/");
 		} catch (e: any) {
-			console.error("Save settings error:", e);
 			// Show a more user-friendly message since the data is actually being saved
 			if (
 				e.message &&

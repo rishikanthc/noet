@@ -35,7 +35,6 @@ export function useSettings() {
 					});
 				}
 			} catch (e) {
-				console.error("Failed to load settings:", e);
 			}
 		};
 		loadSettings();

@@ -60,7 +60,6 @@ export function AboutMe() {
 					setDirty(false);
 				}
 			} catch (e: any) {
-				console.error(e);
 				if (!cancelled) setError(e?.message || "Failed to load about me");
 			} finally {
 				if (!cancelled) setLoading(false);
@@ -90,11 +89,9 @@ export function AboutMe() {
 						}));
 					setPostMentions(mentions);
 				} else {
-					console.error("Failed to fetch posts for mentions:", res.status, res.statusText);
 					setPostMentions([]);
 				}
 			} catch (e) {
-				console.error("Failed to load posts for mentions:", e);
 				setPostMentions([]);
 			} finally {
 				setMentionsLoaded(true);
@@ -187,7 +184,6 @@ export function AboutMe() {
 													setDirty(false);
 												}
 											} catch (e) {
-												console.error(e);
 												// keep dirty = true so the dot stays visible
 											}
 										}

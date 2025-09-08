@@ -24,6 +24,5 @@ func main() {
 		log.Fatalf("failed to initialize app: %v", err)
 	}
 	addr := ":8081"
-	log.Printf("Noet server listening on %s (db: %s)", addr, dbPath)
 	log.Fatal(http.ListenAndServe(addr, app.Mux))
 }

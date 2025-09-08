@@ -32,11 +32,8 @@ export function Archive() {
 			if (res.ok) {
 				const updatedPost = await res.json();
 				setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
-			} else {
-				console.error('Failed to toggle privacy');
 			}
 		} catch (error) {
-			console.error('Privacy toggle error:', error);
 		} finally {
 			setTogglingPrivacy(null);
 		}
@@ -53,7 +50,6 @@ export function Archive() {
 			// Remove post from local state immediately for responsive UI
 			setPosts((prev) => prev.filter((p) => p.id !== postId));
 		} catch (e) {
-			console.error(e);
 			alert("Failed to delete post");
 		}
 	};
@@ -86,10 +82,8 @@ export function Archive() {
 	}, [posts, searchQuery]);
 
 	useEffect(() => {
-		console.log("📋 Archive useEffect: Starting, token:", !!token);
 		const load = async () => {
 			try {
-				console.log("📋 Archive: Fetching posts with auth:", !!token);
 				const res = await fetch("/api/posts", {
 					headers: token ? { Authorization: `Bearer ${token}` } : {}
 				});
@@ -97,7 +91,6 @@ export function Archive() {
 					const list: Note[] = await res.json();
 					// Handle null/undefined response
 					const posts = ensureArray(list);
-					console.log("📋 Archive: Received", posts.length, "posts. Private posts:", posts.filter(p => p.isPrivate).length);
 					const sorted = [...posts].sort((a, b) => {
 						const au = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
 						const bu = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
@@ -105,7 +98,6 @@ export function Archive() {
 					});
 					setPosts(sorted);
 				} else {
-					console.log("📋 Archive: Failed to fetch posts:", res.status);
 					// Only set error for actual server errors, not empty results
 					if (res.status >= 500) {
 						setError("Failed to load posts");
@@ -115,7 +107,6 @@ export function Archive() {
 					}
 				}
 			} catch (e) {
-				console.log("📋 Archive: Error fetching posts:", e);
 				setError("Failed to load posts");
 			} finally {
 				setLoading(false);

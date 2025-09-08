@@ -9,23 +9,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [refreshTokenValue, setRefreshTokenValue] = useState<string | null>(null);
 
 	useEffect(() => {
-		console.log("🔐 Auth useEffect: Starting authentication check");
 		// Check for existing tokens in localStorage
 		const savedToken = localStorage.getItem("auth_token");
 		const savedRefreshToken = localStorage.getItem("refresh_token");
-		console.log("🔐 Auth useEffect: savedToken exists:", !!savedToken, "savedRefreshToken exists:", !!savedRefreshToken);
 		
 		if (savedToken) {
-			console.log("🔐 Auth useEffect: Validating token...");
 			// Validate token
 			fetch("/api/auth/validate", {
 				headers: { Authorization: `Bearer ${savedToken}` },
 			})
 				.then((res) => res.json())
 				.then((data) => {
-					console.log("🔐 Auth useEffect: Token validation result:", data.valid);
 					if (data.valid) {
-						console.log("🔐 Auth useEffect: Setting authenticated state");
 						setToken(savedToken);
 						setUser(data.user);
 						if (savedRefreshToken) {
