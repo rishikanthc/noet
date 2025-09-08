@@ -37,7 +37,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 						}
 					}
 				})
-				.catch(() => {
+				.catch((error) => {
+					console.error("AuthProvider: Token validation request failed", error);
 					// Error validating, try refresh if we have refresh token
 					if (savedRefreshToken) {
 						attemptRefresh(savedRefreshToken);
@@ -65,11 +66,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				localStorage.setItem("auth_token", data.token);
 				localStorage.setItem("refresh_token", data.refreshToken);
 			} else {
+				console.error("AuthProvider: Token refresh failed - invalid response", { status: res.status });
 				// Refresh failed, clear everything
 				localStorage.removeItem("auth_token");
 				localStorage.removeItem("refresh_token");
 			}
-		} catch {
+		} catch (error) {
+			console.error("AuthProvider: Token refresh request failed", error);
 			localStorage.removeItem("auth_token");
 			localStorage.removeItem("refresh_token");
 		}
@@ -94,9 +97,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				localStorage.setItem("auth_token", data.token);
 				localStorage.setItem("refresh_token", data.refreshToken);
 				return true;
+			} else {
+				console.error("AuthProvider: Login failed - invalid credentials", { status: res.status, username });
 			}
 			return false;
-		} catch {
+		} catch (error) {
+			console.error("AuthProvider: Login request failed", error);
 			return false;
 		}
 	};
@@ -128,9 +134,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				localStorage.setItem("auth_token", data.token);
 				localStorage.setItem("refresh_token", data.refreshToken);
 				return true;
+			} else {
+				console.error("AuthProvider: Registration failed", { status: res.status, username });
 			}
 			return false;
-		} catch {
+		} catch (error) {
+			console.error("AuthProvider: Registration request failed", error);
 			return false;
 		}
 	};
@@ -153,9 +162,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				localStorage.setItem("auth_token", data.token);
 				localStorage.setItem("refresh_token", data.refreshToken);
 				return true;
+			} else {
+				console.error("AuthProvider: Manual token refresh failed", { status: res.status });
 			}
 			return false;
-		} catch {
+		} catch (error) {
+			console.error("AuthProvider: Manual token refresh request failed", error);
 			return false;
 		}
 	};

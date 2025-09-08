@@ -51,6 +51,7 @@ export function Home() {
 			const note = await res.json();
 			window.location.assign(`/posts/${note.id}`);
 		} catch (e) {
+			console.error("Home: Failed to create new post", e);
 			alert("Failed to create a new post");
 		} finally {
 			setCreating(false);

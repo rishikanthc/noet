@@ -60,6 +60,7 @@ export function AboutMe() {
 					setDirty(false);
 				}
 			} catch (e: any) {
+				console.error("AboutMe: Failed to load about me content", e);
 				if (!cancelled) setError(e?.message || "Failed to load about me");
 			} finally {
 				if (!cancelled) setLoading(false);
@@ -92,6 +93,7 @@ export function AboutMe() {
 					setPostMentions([]);
 				}
 			} catch (e) {
+				console.error("AboutMe: Failed to load post mentions", e);
 				setPostMentions([]);
 			} finally {
 				setMentionsLoaded(true);
@@ -184,6 +186,7 @@ export function AboutMe() {
 													setDirty(false);
 												}
 											} catch (e) {
+												console.error("AboutMe: Auto-save failed", e);
 												// keep dirty = true so the dot stays visible
 											}
 										}

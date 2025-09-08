@@ -86,6 +86,7 @@ export function PostEditor({ id }: PostEditorProps) {
 			const note = await res.json();
 			window.location.assign(`/posts/${note.id}`);
 		} catch (e) {
+			console.error("PostEditor: Failed to create new post", e);
 			alert("Failed to create a new post");
 		} finally {
 			setCreating(false);
@@ -145,6 +146,7 @@ export function PostEditor({ id }: PostEditorProps) {
 				}
 
 			} catch (e: any) {
+				console.error("PostEditor: Failed to load post data", e);
 				if (!cancelled) setError(e?.message || "Failed to load note");
 			} finally {
 				if (!cancelled) {
@@ -227,6 +229,7 @@ export function PostEditor({ id }: PostEditorProps) {
 												// Refresh backlinks after save
 												loadBacklinks();
 											} catch (e) {
+												console.error("PostEditor: Auto-save failed", e);
 												// keep dirty = true so the dot stays visible
 											}
 										}

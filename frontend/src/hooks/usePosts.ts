@@ -35,6 +35,7 @@ export function usePosts(token: string | null) {
 					}
 				}
 			} catch (e) {
+				console.error("usePosts: Failed to fetch posts", e);
 			}
 		})();
 
@@ -60,6 +61,7 @@ export function usePosts(token: string | null) {
 						setError(undefined);
 					}
 				} catch (e) {
+					console.error("usePosts: Failed to parse SSE snapshot data", e);
 				} finally {
 					setLoading(false);
 				}
@@ -70,6 +72,7 @@ export function usePosts(token: string | null) {
 					const note: Note = JSON.parse(ev.data);
 					setPosts((prev) => upsert(prev, note));
 				} catch (e) {
+					console.error("usePosts: Failed to parse SSE post-created data", e);
 				}
 			});
 			es.addEventListener("post-updated", (ev: MessageEvent) => {
@@ -78,6 +81,7 @@ export function usePosts(token: string | null) {
 					const note: Note = JSON.parse(ev.data);
 					setPosts((prev) => upsert(prev, note));
 				} catch (e) {
+					console.error("usePosts: Failed to parse SSE post-updated data", e);
 				}
 			});
 			es.addEventListener("post-deleted", (ev: MessageEvent) => {
@@ -86,11 +90,14 @@ export function usePosts(token: string | null) {
 					const { id } = JSON.parse(ev.data);
 					setPosts((prev) => prev.filter((p) => p.id !== id));
 				} catch (e) {
+					console.error("usePosts: Failed to parse SSE post-deleted data", e);
 				}
 			});
 			es.onerror = (e) => {
+				console.error("usePosts: SSE connection error", e);
 			};
 		} catch (e) {
+			console.error("usePosts: Failed to initialize SSE connection", e);
 		}
 
 		return () => {
@@ -128,6 +135,7 @@ export function usePosts(token: string | null) {
 				setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
 			}
 		} catch (error) {
+			console.error("usePosts: Failed to toggle post privacy", { postId, error });
 		}
 	}, [token]);
 

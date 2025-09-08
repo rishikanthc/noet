@@ -39,6 +39,7 @@ export function Settings() {
 					setLogLevel(logData.level || "INFO");
 				}
 			} catch (e) {
+				console.error("Settings: Failed to load settings", e);
 			} finally {
 				setLoading(false);
 			}
@@ -70,6 +71,7 @@ export function Settings() {
 			const data = await response.json();
 			setHeroImage(data.url);
 		} catch (e: any) {
+			console.error("Settings: Image upload failed", e);
 			alert(`Failed to upload image: ${e.message}`);
 		} finally {
 			setUploading(false);
@@ -214,6 +216,7 @@ export function Settings() {
 
 			window.location.assign("/");
 		} catch (e: any) {
+			console.error("Settings: Failed to save settings", e);
 			// Show a more user-friendly message since the data is actually being saved
 			if (
 				e.message &&

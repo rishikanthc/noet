@@ -27,6 +27,7 @@ export function AppContent() {
 					setNeedsSetup(data.needsSetup);
 				}
 			} catch (e) {
+				console.error("AppContent: Failed to check setup status", e);
 				// Assume setup is not needed if we can't check
 				setNeedsSetup(false);
 			} finally {

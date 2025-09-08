@@ -34,6 +34,7 @@ export function Archive() {
 				setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
 			}
 		} catch (error) {
+			console.error("Archive: Failed to toggle post privacy", { postId, error });
 		} finally {
 			setTogglingPrivacy(null);
 		}
@@ -50,6 +51,7 @@ export function Archive() {
 			// Remove post from local state immediately for responsive UI
 			setPosts((prev) => prev.filter((p) => p.id !== postId));
 		} catch (e) {
+			console.error("Archive: Failed to delete post", { postId, error: e });
 			alert("Failed to delete post");
 		}
 	};
@@ -107,6 +109,7 @@ export function Archive() {
 					}
 				}
 			} catch (e) {
+				console.error("Archive: Failed to load posts", e);
 				setError("Failed to load posts");
 			} finally {
 				setLoading(false);

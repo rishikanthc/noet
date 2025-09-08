@@ -53,6 +53,7 @@ export const AIEditDialog = memo<AIEditDialogProps>(function AIEditDialog({
 			setEditedText(result);
 			setShowPreview(true);
 		} catch (err: any) {
+			console.error("AIEditDialog: Failed to process text with AI", err);
 			setError(err.message || 'Failed to process text');
 		} finally {
 			setIsLoading(false);
