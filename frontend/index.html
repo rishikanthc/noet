@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Noet Editor</title>
+    
+    <!-- Preload critical resources for faster loading -->
+    <link rel="modulepreload" href="/src/main.tsx" />
+    <link rel="modulepreload" href="/src/App.tsx" />
+    <link rel="preload" href="/src/styles.css" as="style" />
+    
+    <!-- DNS prefetch for potential API calls -->
+    <link rel="dns-prefetch" href="/api" />
   </head>
   <body>
     <div id="root"></div>

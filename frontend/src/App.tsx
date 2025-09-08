@@ -4,7 +4,6 @@ import { getPresetById } from "textforge";
 import { AuthProvider } from "./components/auth/AuthProvider";
 import { AppContent } from "./components/AppContent";
 import { queryClient } from "./lib/queryClient";
-import { register as registerSW } from "./lib/serviceWorker";
 import "./styles.css";
 
 export default function App() {
@@ -17,22 +16,6 @@ export default function App() {
 			root.style.setProperty("--font-body", preset.body);
 			root.style.setProperty("--font-heading", preset.heading);
 		}
-
-		// Register Service Worker for offline support
-		registerSW({
-			onSuccess: () => {
-				console.log('App cached for offline use');
-			},
-			onUpdate: () => {
-				console.log('New version available, reload to update');
-			},
-			onOffline: () => {
-				// Could show offline indicator
-			},
-			onOnline: () => {
-				// Could hide offline indicator
-			},
-		});
 	}, []);
 
 	return (
