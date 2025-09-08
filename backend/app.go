@@ -1587,9 +1587,19 @@ func (a *App) routes() {
         
         a.Logger.Debug("SSE client registered", "clientID", id, "remoteAddr", r.RemoteAddr)
 
-        // Send snapshot - always use the authentication status from the request
+        // Send snapshot - check authentication from header OR query parameter
         isAuth := a.isAuthenticated(r)
-        a.Logger.Debug("SSE: Authentication check", "clientID", id, "isAuthenticated", isAuth)
+        if !isAuth {
+            // Check for token in query parameter as fallback (EventSource can't send custom headers)
+            tokenParam := r.URL.Query().Get("token")
+            if tokenParam != "" {
+                // Create a temporary request with the token in Authorization header to reuse existing auth logic
+                tempReq := &http.Request{Header: make(http.Header)}
+                tempReq.Header.Set("Authorization", "Bearer "+tokenParam)
+                isAuth = a.isAuthenticated(tempReq)
+            }
+        }
+        a.Logger.Debug("SSE: Authentication check", "clientID", id, "isAuthenticated", isAuth, "hasToken", r.URL.Query().Get("token") != "")
         
         posts, err := a.getPostsWithPrivacy(isAuth)
         if err == nil {

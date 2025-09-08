@@ -1,18 +1,87 @@
-import { useState, useEffect, useCallback, useMemo, memo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../hooks/useAuth";
-import { usePosts } from "../../hooks/usePosts";
 import { useSettings } from "../../hooks/useSettings";
 import { Header } from "../layout/Header";
 import { ContextMenu } from "../common/ContextMenu";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { PrivacyToggle } from "../common/PrivacyToggle";
-import { type ContextMenuState, type ConfirmDialogState } from "../../types";
+import { type Note, type ContextMenuState, type ConfirmDialogState } from "../../types";
 import { formatDate } from "../../utils";
 
 export function Home() {
 	const { isAuthenticated, logout, token } = useAuth();
-	const { posts, loading, error, deletePost, togglePrivacy } = usePosts(token);
 	const { settings } = useSettings();
+	const [posts, setPosts] = useState<Note[]>([]);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | undefined>();
+	
+	// Simple fetch approach like Archive page
+	useEffect(() => {
+		const load = async () => {
+			try {
+				const res = await fetch("/api/posts", {
+					headers: token ? { Authorization: `Bearer ${token}` } : {}
+				});
+				if (res.ok) {
+					const list: Note[] = await res.json();
+					// Handle null/undefined response
+					const posts = list || [];
+					const sorted = [...posts].sort((a, b) => {
+						const au = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+						const bu = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+						return bu - au;
+					}).slice(0, 10); // Show only latest 10 posts on homepage
+					setPosts(sorted);
+				} else {
+					if (res.status >= 500) {
+						setError("Failed to load posts");
+					} else {
+						setPosts([]);
+					}
+				}
+			} catch (e) {
+				console.error("Home: Failed to load posts", e);
+				setError("Failed to load posts");
+			} finally {
+				setLoading(false);
+			}
+		};
+		
+		load();
+	}, [token]);
+	
+	const deletePost = useCallback(async (postId: number) => {
+		if (!token) return;
+		try {
+			const res = await fetch(`/api/posts/${postId}`, {
+				method: "DELETE",
+				headers: { Authorization: `Bearer ${token}` },
+			});
+			if (!res.ok) throw new Error(`Failed to delete post: ${res.status}`);
+			setPosts((prev) => prev.filter((p) => p.id !== postId));
+		} catch (e) {
+			alert("Failed to delete post");
+		}
+	}, [token]);
+
+	const togglePrivacy = useCallback(async (postId: number) => {
+		if (!token) return;
+		
+		try {
+			const res = await fetch(`/api/posts/${postId}/publish`, {
+				method: 'PUT',
+				headers: { Authorization: `Bearer ${token}` },
+			});
+			
+			if (res.ok) {
+				const updatedPost = await res.json();
+				setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
+			}
+		} catch (error) {
+			console.error("Home: Failed to toggle post privacy", { postId, error });
+		}
+	}, [token]);
+	
 	const [creating, setCreating] = useState(false);
 	const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
 	const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null);

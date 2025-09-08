@@ -7,43 +7,64 @@ export function usePosts(token: string | null) {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
 	const lastAuthenticatedFetch = useRef<number>(0);
+	const currentToken = useRef<string | null>(null);
+	const eventSource = useRef<EventSource | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
 		
 		const upsert = (list: Note[], item: Note) => upsertNote(list, item);
 
-		// Fallback initial load in case SSE is blocked
-		(async () => {
-			try {
-				const res = await fetch("/api/posts", {
-					headers: token ? { Authorization: `Bearer ${token}` } : {}
-				});
-				if (res.ok) {
-					const list = await res.json();
-					// Handle null/undefined response
-					const posts = ensureArray(list);
-					if (!cancelled) {
-						const sortedList = sortNotes(posts);
-						
-						// Mark that we just fetched with authentication if we have a token
-						if (token) {
-							lastAuthenticatedFetch.current = Date.now();
-						}
-						
-						setPosts(sortedList);
-					}
-				}
-			} catch (e) {
-				console.error("usePosts: Failed to fetch posts", e);
+		// Only create new connection if token actually changed
+		const tokenChanged = currentToken.current !== token;
+		
+		if (tokenChanged) {
+			// Close existing connection if it exists
+			if (eventSource.current) {
+				eventSource.current.close();
+				eventSource.current = null;
 			}
-		})();
+			
+			currentToken.current = token;
+		}
 
-		// Connect to SSE for live updates
-		let es: EventSource | undefined;
-		try {
-			es = new EventSource("/api/posts/stream");
-			es.addEventListener("snapshot", (ev: MessageEvent) => {
+		// Fallback initial load in case SSE is blocked (only run if token changed or no connection exists)
+		if (tokenChanged || !eventSource.current) {
+			(async () => {
+				try {
+					const res = await fetch("/api/posts", {
+						headers: token ? { Authorization: `Bearer ${token}` } : {}
+					});
+					if (res.ok) {
+						const list = await res.json();
+						// Handle null/undefined response
+						const posts = ensureArray(list);
+						if (!cancelled) {
+							const sortedList = sortNotes(posts);
+							
+							// Mark that we just fetched with authentication if we have a token
+							if (token) {
+								lastAuthenticatedFetch.current = Date.now();
+							}
+							
+							setPosts(sortedList);
+						}
+					}
+				} catch (e) {
+					console.error("usePosts: Failed to fetch posts", e);
+				}
+			})();
+		}
+
+		// Connect to SSE for live updates (only if no existing connection or token changed)
+		if (!eventSource.current) {
+			try {
+				// EventSource doesn't support custom headers, so we pass the token as a query parameter
+				const streamUrl = token ? `/api/posts/stream?token=${encodeURIComponent(token)}` : "/api/posts/stream";
+				const es = new EventSource(streamUrl);
+				eventSource.current = es;
+				
+				es.addEventListener("snapshot", (ev: MessageEvent) => {
 				if (cancelled) return;
 				try {
 					const list: Note[] = JSON.parse(ev.data);
@@ -96,15 +117,27 @@ export function usePosts(token: string | null) {
 			es.onerror = (e) => {
 				console.error("usePosts: SSE connection error", e);
 			};
-		} catch (e) {
-			console.error("usePosts: Failed to initialize SSE connection", e);
+			} catch (e) {
+				console.error("usePosts: Failed to initialize SSE connection", e);
+			}
 		}
 
 		return () => {
 			cancelled = true;
-			if (es) es.close();
+			// Don't close the connection here unless the component is unmounting or token changed
+			// The connection will be reused across effect re-runs
 		};
 	}, [token]);
+	
+	// Cleanup effect for component unmount
+	useEffect(() => {
+		return () => {
+			if (eventSource.current) {
+				eventSource.current.close();
+				eventSource.current = null;
+			}
+		};
+	}, []);
 
 	const deletePost = useCallback(async (postId: number) => {
 		if (!token) return;
