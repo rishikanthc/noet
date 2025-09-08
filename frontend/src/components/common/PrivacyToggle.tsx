@@ -1,13 +1,17 @@
-export function PrivacyToggle({ 
-	postId, 
-	isPrivate, 
-	onToggle, 
-	isToggling = false 
-}: {
+import { memo } from 'react';
+
+interface PrivacyToggleProps {
 	postId: number;
 	isPrivate: boolean;
 	onToggle: (postId: number) => void;
 	isToggling?: boolean;
+}
+
+export const PrivacyToggle = memo<PrivacyToggleProps>(function PrivacyToggle({ 
+	postId, 
+	isPrivate, 
+	onToggle, 
+	isToggling = false 
 }) {
 	return (
 		<button
@@ -49,4 +53,4 @@ export function PrivacyToggle({
 			)}
 		</button>
 	);
-}
+});

@@ -22,5 +22,5 @@ backend/static
 backend/static
 data
 README.Docker.md
-frontend
 pic.png
+frontend/public/pic2.png
