@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline - Noet</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: #fefefe;
+            color: #333;
+            text-align: center;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+        }
+        .offline-container {
+            max-width: 400px;
+        }
+        h1 {
+            margin-bottom: 16px;
+            color: #111;
+        }
+        p {
+            margin-bottom: 24px;
+            color: #666;
+            line-height: 1.6;
+        }
+        .retry-button {
+            padding: 12px 24px;
+            background: #000;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .retry-button:hover {
+            background: #333;
+        }
+    </style>
+</head>
+<body>
+    <div class="offline-container">
+        <h1>You're offline</h1>
+        <p>It looks like you've lost your internet connection. Don't worry — any posts you've viewed recently are still available.</p>
+        <button class="retry-button" onclick="location.reload()">Try Again</button>
+    </div>
+</body>
+</html>

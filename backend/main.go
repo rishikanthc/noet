@@ -27,5 +27,5 @@ func main() {
 	addr := ":8081"
 	app.Logger.Info("Starting Noet server", "address", addr, "database", dbPath)
 	slog.Info("Server starting up", "address", addr)
-	log.Fatal(http.ListenAndServe(addr, app.Mux))
+	log.Fatal(http.ListenAndServe(addr, app.Handler()))
 }

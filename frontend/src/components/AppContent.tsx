@@ -1,11 +1,14 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, Suspense, lazy } from "react";
 import { Login } from "./auth/Login";
 import { Registration } from "./auth/Registration";
-import { Home } from "./pages/Home";
-import { Archive } from "./pages/Archive";
-import { AboutMe } from "./pages/AboutMe";
-import { Settings } from "./pages/Settings";
-import { PostEditor } from "./pages/PostEditor";
+import { LoadingSpinner } from "./common/LoadingSpinner";
+
+// Lazy load page components for code splitting
+const Home = lazy(() => import("./pages/Home").then(module => ({ default: module.Home })));
+const Archive = lazy(() => import("./pages/Archive").then(module => ({ default: module.Archive })));
+const AboutMe = lazy(() => import("./pages/AboutMe").then(module => ({ default: module.AboutMe })));
+const Settings = lazy(() => import("./pages/Settings").then(module => ({ default: module.Settings })));
+const PostEditor = lazy(() => import("./pages/PostEditor").then(module => ({ default: module.PostEditor })));
 
 export function AppContent() {
 	const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
@@ -54,21 +57,22 @@ export function AppContent() {
 		return <Registration />;
 	}
 
-	// Normal app routing
-	if (path === "/admin") {
-		return <Login />;
-	}
-	if (match) {
-		return <PostEditor id={match} />;
-	}
-	if (path === "/archive") {
-		return <Archive />;
-	}
-	if (path === "/about") {
-		return <AboutMe />;
-	}
-	if (path === "/settings") {
-		return <Settings />;
-	}
-	return <Home />;
+	// Normal app routing with Suspense for code splitting
+	return (
+		<Suspense fallback={<LoadingSpinner />}>
+			{path === "/admin" ? (
+				<Login />
+			) : match ? (
+				<PostEditor id={match} />
+			) : path === "/archive" ? (
+				<Archive />
+			) : path === "/about" ? (
+				<AboutMe />
+			) : path === "/settings" ? (
+				<Settings />
+			) : (
+				<Home />
+			)}
+		</Suspense>
+	);
 }

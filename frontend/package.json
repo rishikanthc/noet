@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@tanstack/react-query": "^5.87.1",
     "@tiptap/core": "^3.4.1",
     "@tiptap/extension-code-block-lowlight": "^3.4.1",
     "@tiptap/extension-file-handler": "^3.4.1",

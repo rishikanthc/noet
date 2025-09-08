@@ -1,0 +1,268 @@
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { type Note } from '../types';
+import { sortNotes, ensureArray } from '../utils';
+
+// Query keys for React Query
+export const postsQueryKeys = {
+  all: ['posts'] as const,
+  lists: () => [...postsQueryKeys.all, 'list'] as const,
+  list: (authenticated: boolean) => [...postsQueryKeys.lists(), { authenticated }] as const,
+  details: () => [...postsQueryKeys.all, 'detail'] as const,
+  detail: (id: string | number) => [...postsQueryKeys.details(), id] as const,
+};
+
+// Fetch posts from the API
+async function fetchPosts(token: string | null): Promise<Note[]> {
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  
+  const response = await fetch('/api/posts', { headers });
+  
+  if (!response.ok) {
+    if (response.status >= 500) {
+      throw new Error('Failed to load posts');
+    }
+    // For client errors, return empty array
+    return [];
+  }
+  
+  const data = await response.json();
+  const posts = ensureArray(data);
+  return sortNotes(posts);
+}
+
+// Fetch a single post
+async function fetchPost(id: string, token: string | null): Promise<Note> {
+  const headers = token ? { Authorization: `Bearer ${token}` } : {};
+  
+  const response = await fetch(`/api/posts/${id}`, { headers });
+  
+  if (!response.ok) {
+    throw new Error(response.status === 404 ? 'Post not found' : 'Failed to load post');
+  }
+  
+  return response.json();
+}
+
+// Create a new post
+async function createPost(token: string): Promise<Note> {
+  const response = await fetch('/api/posts', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to create post: ${response.status}`);
+  }
+  
+  return response.json();
+}
+
+// Update a post
+async function updatePost(id: string, content: string, token: string): Promise<Note> {
+  const response = await fetch(`/api/posts/${id}`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ content }),
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to update post: ${response.status}`);
+  }
+  
+  return response.json();
+}
+
+// Delete a post
+async function deletePost(id: string, token: string): Promise<void> {
+  const response = await fetch(`/api/posts/${id}`, {
+    method: 'DELETE',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to delete post: ${response.status}`);
+  }
+}
+
+// Toggle post privacy
+async function togglePostPrivacy(id: string, token: string): Promise<Note> {
+  const response = await fetch(`/api/posts/${id}/publish`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  
+  if (!response.ok) {
+    throw new Error(`Failed to toggle post privacy: ${response.status}`);
+  }
+  
+  return response.json();
+}
+
+// Hook to fetch all posts
+export function usePostsQuery(token: string | null) {
+  const isAuthenticated = !!token;
+  
+  return useQuery({
+    queryKey: postsQueryKeys.list(isAuthenticated),
+    queryFn: () => fetchPosts(token),
+    staleTime: 30 * 1000, // Consider data stale after 30 seconds
+    gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
+    refetchOnWindowFocus: true,
+    refetchInterval: 60 * 1000, // Background refetch every minute
+  });
+}
+
+// Hook to fetch a single post
+export function usePostQuery(id: string, token: string | null) {
+  return useQuery({
+    queryKey: postsQueryKeys.detail(id),
+    queryFn: () => fetchPost(id, token),
+    staleTime: 2 * 60 * 1000, // Consider data stale after 2 minutes
+    gcTime: 10 * 60 * 1000, // Keep in cache for 10 minutes
+  });
+}
+
+// Hook to create a new post
+export function useCreatePost() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ token }: { token: string }) => createPost(token),
+    onSuccess: (newPost) => {
+      // Add the new post to the cache optimistically
+      queryClient.setQueryData(
+        postsQueryKeys.list(true),
+        (oldData: Note[] | undefined) => {
+          if (!oldData) return [newPost];
+          return [newPost, ...oldData];
+        }
+      );
+      
+      // Invalidate posts list to trigger a background refetch
+      queryClient.invalidateQueries({ queryKey: postsQueryKeys.lists() });
+    },
+  });
+}
+
+// Hook to update a post
+export function useUpdatePost() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ id, content, token }: { id: string; content: string; token: string }) =>
+      updatePost(id, content, token),
+    onSuccess: (updatedPost) => {
+      // Update the post in cache
+      queryClient.setQueryData(postsQueryKeys.detail(updatedPost.id), updatedPost);
+      
+      // Update the post in the posts list
+      queryClient.setQueryData(
+        postsQueryKeys.list(true),
+        (oldData: Note[] | undefined) => {
+          if (!oldData) return [updatedPost];
+          return oldData.map((post) =>
+            post.id === updatedPost.id ? updatedPost : post
+          );
+        }
+      );
+      
+      // Also update the unauthenticated list if the post is public
+      if (!updatedPost.isPrivate) {
+        queryClient.setQueryData(
+          postsQueryKeys.list(false),
+          (oldData: Note[] | undefined) => {
+            if (!oldData) return [updatedPost];
+            return oldData.map((post) =>
+              post.id === updatedPost.id ? updatedPost : post
+            );
+          }
+        );
+      }
+      
+      // Invalidate posts lists to trigger background refetch
+      queryClient.invalidateQueries({ queryKey: postsQueryKeys.lists() });
+    },
+  });
+}
+
+// Hook to delete a post
+export function useDeletePost() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ id, token }: { id: string; token: string }) => deletePost(id, token),
+    onSuccess: (_, { id }) => {
+      // Remove post from all lists
+      queryClient.setQueryData(
+        postsQueryKeys.list(true),
+        (oldData: Note[] | undefined) => {
+          if (!oldData) return [];
+          return oldData.filter((post) => post.id.toString() !== id);
+        }
+      );
+      
+      queryClient.setQueryData(
+        postsQueryKeys.list(false),
+        (oldData: Note[] | undefined) => {
+          if (!oldData) return [];
+          return oldData.filter((post) => post.id.toString() !== id);
+        }
+      );
+      
+      // Remove post detail from cache
+      queryClient.removeQueries({ queryKey: postsQueryKeys.detail(id) });
+      
+      // Invalidate posts lists
+      queryClient.invalidateQueries({ queryKey: postsQueryKeys.lists() });
+    },
+  });
+}
+
+// Hook to toggle post privacy
+export function useTogglePostPrivacy() {
+  const queryClient = useQueryClient();
+  
+  return useMutation({
+    mutationFn: ({ id, token }: { id: string; token: string }) =>
+      togglePostPrivacy(id, token),
+    onSuccess: (updatedPost) => {
+      // Update the post in cache
+      queryClient.setQueryData(postsQueryKeys.detail(updatedPost.id), updatedPost);
+      
+      // Update the authenticated posts list
+      queryClient.setQueryData(
+        postsQueryKeys.list(true),
+        (oldData: Note[] | undefined) => {
+          if (!oldData) return [updatedPost];
+          return oldData.map((post) =>
+            post.id === updatedPost.id ? updatedPost : post
+          );
+        }
+      );
+      
+      // Handle unauthenticated list - add if public, remove if private
+      queryClient.setQueryData(
+        postsQueryKeys.list(false),
+        (oldData: Note[] | undefined) => {
+          if (!oldData) return updatedPost.isPrivate ? [] : [updatedPost];
+          
+          const filteredData = oldData.filter((post) => post.id !== updatedPost.id);
+          
+          if (updatedPost.isPrivate) {
+            // Post is now private, remove from public list
+            return filteredData;
+          } else {
+            // Post is now public, add to public list
+            return sortNotes([...filteredData, updatedPost]);
+          }
+        }
+      );
+      
+      // Invalidate posts lists
+      queryClient.invalidateQueries({ queryKey: postsQueryKeys.lists() });
+    },
+  });
+}

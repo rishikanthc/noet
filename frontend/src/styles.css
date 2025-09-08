@@ -707,3 +707,29 @@ header h1 {
 	0% { transform: rotate(0deg); }
 	100% { transform: rotate(360deg); }
 }
+
+/* Loading Spinner */
+.loading-spinner {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	padding: 48px 24px;
+	min-height: 200px;
+}
+
+.loading-spinner .spinner {
+	width: 32px;
+	height: 32px;
+	border: 2px solid #f3f3f3;
+	border-top: 2px solid #000000;
+	border-radius: 50%;
+	animation: spin 1s linear infinite;
+	margin-bottom: 16px;
+}
+
+.loading-spinner p {
+	margin: 0;
+	color: #666666;
+	font-size: 14px;
+}

@@ -6,107 +6,104 @@ export function usePosts(token: string | null) {
 	const [posts, setPosts] = useState<Note[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
-	const lastAuthenticatedFetch = useRef<number>(0);
-	const currentToken = useRef<string | null>(null);
-	const eventSource = useRef<EventSource | null>(null);
+	
+	// Stable refs for connection management
+	const eventSourceRef = useRef<EventSource | null>(null);
+	const currentTokenRef = useRef<string | null>(null);
+	const isInitializedRef = useRef(false);
+	const abortControllerRef = useRef<AbortController | null>(null);
 
-	useEffect(() => {
-		let cancelled = false;
-		
-		const upsert = (list: Note[], item: Note) => upsertNote(list, item);
+	// Cleanup function to properly close connections
+	const cleanup = useCallback(() => {
+		if (eventSourceRef.current) {
+			eventSourceRef.current.close();
+			eventSourceRef.current = null;
+		}
+		if (abortControllerRef.current) {
+			abortControllerRef.current.abort();
+			abortControllerRef.current = null;
+		}
+	}, []);
 
-		// Only create new connection if token actually changed
-		const tokenChanged = currentToken.current !== token;
-		
-		if (tokenChanged) {
-			// Close existing connection if it exists
-			if (eventSource.current) {
-				eventSource.current.close();
-				eventSource.current = null;
-			}
+	// Initial data fetch function
+	const fetchInitialData = useCallback(async (authToken: string | null, signal: AbortSignal) => {
+		try {
+			const res = await fetch("/api/posts", {
+				headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
+				signal
+			});
 			
-			currentToken.current = token;
+			if (signal.aborted) return;
+			
+			if (res.ok) {
+				const list = await res.json();
+				const posts = ensureArray(list);
+				const sortedList = sortNotes(posts);
+				setPosts(sortedList);
+				setError(undefined);
+			} else if (res.status >= 500) {
+				setError("Failed to load posts");
+			} else {
+				setPosts([]);
+				setError(undefined);
+			}
+		} catch (e) {
+			if (!signal.aborted) {
+				console.error("usePosts: Failed to fetch posts", e);
+				setError("Failed to load posts");
+			}
+		} finally {
+			if (!signal.aborted) {
+				setLoading(false);
+			}
 		}
+	}, []);
 
-		// Fallback initial load in case SSE is blocked (only run if token changed or no connection exists)
-		if (tokenChanged || !eventSource.current) {
-			(async () => {
-				try {
-					const res = await fetch("/api/posts", {
-						headers: token ? { Authorization: `Bearer ${token}` } : {}
-					});
-					if (res.ok) {
-						const list = await res.json();
-						// Handle null/undefined response
-						const posts = ensureArray(list);
-						if (!cancelled) {
-							const sortedList = sortNotes(posts);
-							
-							// Mark that we just fetched with authentication if we have a token
-							if (token) {
-								lastAuthenticatedFetch.current = Date.now();
-							}
-							
-							setPosts(sortedList);
-						}
-					}
-				} catch (e) {
-					console.error("usePosts: Failed to fetch posts", e);
-				}
-			})();
-		}
+	// SSE connection setup
+	const setupSSEConnection = useCallback((authToken: string | null) => {
+		try {
+			// Use absolute URL in production to ensure proper routing through Caddy
+			const baseUrl = window.location.origin;
+			const streamPath = authToken 
+				? `/api/posts/stream?token=${encodeURIComponent(authToken)}` 
+				: "/api/posts/stream";
+			const streamUrl = `${baseUrl}${streamPath}`;
+			
+			console.log('usePosts: Attempting SSE connection to:', streamUrl);
+			const es = new EventSource(streamUrl);
+			eventSourceRef.current = es;
 
-		// Connect to SSE for live updates (only if no existing connection or token changed)
-		if (!eventSource.current) {
-			try {
-				// EventSource doesn't support custom headers, so we pass the token as a query parameter
-				const streamUrl = token ? `/api/posts/stream?token=${encodeURIComponent(token)}` : "/api/posts/stream";
-				const es = new EventSource(streamUrl);
-				eventSource.current = es;
-				
-				es.addEventListener("snapshot", (ev: MessageEvent) => {
-				if (cancelled) return;
+			es.addEventListener("snapshot", (ev: MessageEvent) => {
 				try {
 					const list: Note[] = JSON.parse(ev.data);
-					// Handle null/undefined response
 					const posts = ensureArray(list);
-					const privatePostsInSnapshot = posts.filter(p => p.isPrivate).length;
-					const timeSinceAuthFetch = Date.now() - lastAuthenticatedFetch.current;
-					
-					// If we're authenticated and recently fetched data (within 10 seconds) and the snapshot has NO private posts,
-					// this means SSE is sending public-only data - reject it
-					if (token && timeSinceAuthFetch < 10000 && privatePostsInSnapshot === 0) {
-						// Reject snapshot - recently fetched authenticated data, but snapshot has no private posts
-					} else {
-						setPosts(sortNotes(posts));
-						setError(undefined);
-					}
+					setPosts(sortNotes(posts));
+					setError(undefined);
+					setLoading(false);
 				} catch (e) {
 					console.error("usePosts: Failed to parse SSE snapshot data", e);
-				} finally {
-					setLoading(false);
 				}
 			});
+
 			es.addEventListener("post-created", (ev: MessageEvent) => {
-				if (cancelled) return;
 				try {
 					const note: Note = JSON.parse(ev.data);
-					setPosts((prev) => upsert(prev, note));
+					setPosts((prev) => upsertNote(prev, note));
 				} catch (e) {
 					console.error("usePosts: Failed to parse SSE post-created data", e);
 				}
 			});
+
 			es.addEventListener("post-updated", (ev: MessageEvent) => {
-				if (cancelled) return;
 				try {
 					const note: Note = JSON.parse(ev.data);
-					setPosts((prev) => upsert(prev, note));
+					setPosts((prev) => upsertNote(prev, note));
 				} catch (e) {
 					console.error("usePosts: Failed to parse SSE post-updated data", e);
 				}
 			});
+
 			es.addEventListener("post-deleted", (ev: MessageEvent) => {
-				if (cancelled) return;
 				try {
 					const { id } = JSON.parse(ev.data);
 					setPosts((prev) => prev.filter((p) => p.id !== id));
@@ -114,30 +111,89 @@ export function usePosts(token: string | null) {
 					console.error("usePosts: Failed to parse SSE post-deleted data", e);
 				}
 			});
-			es.onerror = (e) => {
-				console.error("usePosts: SSE connection error", e);
-			};
-			} catch (e) {
-				console.error("usePosts: Failed to initialize SSE connection", e);
-			}
+
+			es.addEventListener("error", (event) => {
+				console.error("usePosts: SSE connection error:", event);
+				console.error("usePosts: EventSource readyState:", es.readyState);
+				console.error("usePosts: EventSource url:", es.url);
+				
+				// If SSE fails, fall back to REST API
+				console.warn("usePosts: SSE connection failed, falling back to REST API");
+				if (eventSourceRef.current === es) {
+					cleanup();
+					// Set up a fallback fetch if SSE completely fails
+					const controller = new AbortController();
+					abortControllerRef.current = controller;
+					fetchInitialData(authToken, controller.signal);
+				}
+			});
+
+			es.addEventListener("open", () => {
+				console.log("usePosts: SSE connection opened successfully");
+			});
+
+		} catch (e) {
+			console.error("usePosts: Failed to initialize SSE connection", e);
+			// Fallback to REST API
+			const controller = new AbortController();
+			abortControllerRef.current = controller;
+			fetchInitialData(authToken, controller.signal);
+		}
+	}, [cleanup, fetchInitialData]);
+
+	// Main effect - handles token changes and connection management
+	useEffect(() => {
+		console.log('usePosts: Effect triggered, token:', token ? 'present' : 'null');
+		console.log('usePosts: isInitialized:', isInitializedRef.current);
+		console.log('usePosts: currentToken matches:', currentTokenRef.current === token);
+		
+		// Only skip if token hasn't changed AND we have an active connection
+		if (currentTokenRef.current === token && eventSourceRef.current && eventSourceRef.current.readyState !== EventSource.CLOSED) {
+			console.log('usePosts: Skipping effect - active connection with same token');
+			return;
 		}
 
-		return () => {
-			cancelled = true;
-			// Don't close the connection here unless the component is unmounting or token changed
-			// The connection will be reused across effect re-runs
-		};
-	}, [token]);
-	
-	// Cleanup effect for component unmount
-	useEffect(() => {
-		return () => {
-			if (eventSource.current) {
-				eventSource.current.close();
-				eventSource.current = null;
+		console.log('usePosts: Proceeding with effect');
+		
+		// Clean up previous connections
+		cleanup();
+		
+		// Update refs
+		currentTokenRef.current = token;
+		isInitializedRef.current = true;
+		
+		// Reset loading state
+		setLoading(true);
+		setError(undefined);
+
+		// Create abort controller for this effect
+		const controller = new AbortController();
+		abortControllerRef.current = controller;
+
+		// Start with initial fetch as fallback
+		console.log('usePosts: Starting initial fetch');
+		fetchInitialData(token, controller.signal).then(() => {
+			// Only set up SSE after initial fetch completes (and if not aborted)
+			if (!controller.signal.aborted) {
+				console.log('usePosts: Initial fetch complete, setting up SSE');
+				setupSSEConnection(token);
+			} else {
+				console.log('usePosts: Initial fetch aborted, skipping SSE setup');
 			}
+		});
+
+		// Cleanup function - only cleanup if token is actually changing
+		return () => {
+			console.log('usePosts: Effect cleanup triggered');
+			// Only cleanup if we're about to create a new connection with different token
+			// Let the component unmount cleanup handle the final cleanup
 		};
-	}, []);
+	}, [token]); // Only depend on token to avoid unnecessary re-runs
+
+	// Component unmount cleanup
+	useEffect(() => {
+		return cleanup;
+	}, [cleanup]);
 
 	const deletePost = useCallback(async (postId: number) => {
 		if (!token) return;

@@ -1,19 +1,18 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useSettings } from "../../hooks/useSettings";
+import { usePosts } from "../../hooks/usePostsNew";
 import { Header } from "../layout/Header";
 import { ContextMenu } from "../common/ContextMenu";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { PrivacyToggle } from "../common/PrivacyToggle";
 import { type Note, type ContextMenuState, type ConfirmDialogState } from "../../types";
-import { formatDate, fuzzySearch, ensureArray } from "../../utils";
+import { formatDate, fuzzySearch } from "../../utils";
 
 export function Archive() {
 	const { isAuthenticated, logout, token } = useAuth();
 	const { settings } = useSettings();
-	const [posts, setPosts] = useState<Note[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | undefined>();
+	const { posts, loading, error, deletePost, togglePrivacy } = usePosts(token);
 	const [searchQuery, setSearchQuery] = useState<string>("");
 	const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
 	const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null);
@@ -24,32 +23,18 @@ export function Archive() {
 		
 		setTogglingPrivacy(postId);
 		try {
-			const res = await fetch(`/api/posts/${postId}/publish`, {
-				method: 'PUT',
-				headers: { Authorization: `Bearer ${token}` },
-			});
-			
-			if (res.ok) {
-				const updatedPost = await res.json();
-				setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
-			}
+			await togglePrivacy(postId);
 		} catch (error) {
 			console.error("Archive: Failed to toggle post privacy", { postId, error });
 		} finally {
 			setTogglingPrivacy(null);
 		}
-	}, [isAuthenticated, token]);
+	}, [isAuthenticated, token, togglePrivacy]);
 
 	const handleDeletePost = async (postId: number) => {
 		if (!isAuthenticated || !token) return;
 		try {
-			const res = await fetch(`/api/posts/${postId}`, {
-				method: "DELETE",
-				headers: { Authorization: `Bearer ${token}` },
-			});
-			if (!res.ok) throw new Error(`Failed to delete post: ${res.status}`);
-			// Remove post from local state immediately for responsive UI
-			setPosts((prev) => prev.filter((p) => p.id !== postId));
+			await deletePost(postId);
 		} catch (e) {
 			console.error("Archive: Failed to delete post", { postId, error: e });
 			alert("Failed to delete post");
@@ -67,11 +52,11 @@ export function Archive() {
 		setConfirmDialog({ postId, title: postTitle });
 	};
 
-	const handleConfirmDelete = async () => {
+	const handleConfirmDelete = useCallback(async () => {
 		if (!confirmDialog) return;
 		await handleDeletePost(confirmDialog.postId);
 		setConfirmDialog(null);
-	};
+	}, [confirmDialog, handleDeletePost]);
 
 	// Filter posts based on search query
 	const filteredPosts = useMemo(() => {
@@ -83,41 +68,6 @@ export function Archive() {
 		});
 	}, [posts, searchQuery]);
 
-	useEffect(() => {
-		const load = async () => {
-			try {
-				const res = await fetch("/api/posts", {
-					headers: token ? { Authorization: `Bearer ${token}` } : {}
-				});
-				if (res.ok) {
-					const list: Note[] = await res.json();
-					// Handle null/undefined response
-					const posts = ensureArray(list);
-					const sorted = [...posts].sort((a, b) => {
-						const au = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-						const bu = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-						return bu - au;
-					});
-					setPosts(sorted);
-				} else {
-					// Only set error for actual server errors, not empty results
-					if (res.status >= 500) {
-						setError("Failed to load posts");
-					} else {
-						// For 4xx errors or empty results, just show empty state
-						setPosts([]);
-					}
-				}
-			} catch (e) {
-				console.error("Archive: Failed to load posts", e);
-				setError("Failed to load posts");
-			} finally {
-				setLoading(false);
-			}
-		};
-		
-		load();
-	}, [token]);
 
 	return (
 		<div className="home-container">

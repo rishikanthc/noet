@@ -2,7 +2,6 @@ package main
 
 import (
     "bytes"
-    "compress/gzip"
     "crypto/rand"
     "crypto/sha256"
     "database/sql"
@@ -49,6 +48,11 @@ type App struct {
     // Simple in-memory cache
     cacheMu sync.RWMutex
     cache   map[string]CacheItem
+
+    // SSE
+    clientsMu    sync.Mutex
+    clients      map[int]chan string
+    nextClientID int
 }
 
 type Post struct {
@@ -82,55 +86,6 @@ type Claims struct {
     jwt.RegisteredClaims
 }
 
-// gzipResponseWriter wraps http.ResponseWriter to compress responses
-type gzipResponseWriter struct {
-    http.ResponseWriter
-    Writer io.Writer
-}
-
-func (w gzipResponseWriter) Write(b []byte) (int, error) {
-    return w.Writer.Write(b)
-}
-
-// gzipMiddleware compresses responses when the client supports it
-func gzipMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // Check if client accepts gzip encoding
-        if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-            next.ServeHTTP(w, r)
-            return
-        }
-
-        // Don't compress certain file types or already compressed content
-        contentType := w.Header().Get("Content-Type")
-        if strings.Contains(contentType, "image/") || 
-           strings.Contains(contentType, "video/") || 
-           strings.Contains(contentType, "audio/") ||
-           strings.Contains(r.URL.Path, ".gz") {
-            next.ServeHTTP(w, r)
-            return
-        }
-
-        // Set gzip headers
-        w.Header().Set("Content-Encoding", "gzip")
-        w.Header().Set("Vary", "Accept-Encoding")
-
-        // Create gzip writer
-        gz := gzip.NewWriter(w)
-        defer gz.Close()
-
-        // Wrap the ResponseWriter
-        gzw := gzipResponseWriter{ResponseWriter: w, Writer: gz}
-        
-        next.ServeHTTP(gzw, r)
-    })
-}
-
-// Handler returns the main HTTP handler with middleware applied
-func (a *App) Handler() http.Handler {
-    return gzipMiddleware(a.Mux)
-}
-
 func NewApp(dbPath string) (*App, error) {
     db, err := sql.Open("sqlite", dbPath)
     if err != nil {
@@ -162,17 +117,6 @@ func NewApp(dbPath string) (*App, error) {
         return nil, err
     }
 
-    // Check if debug logging should be enabled (only set once, not forced)
-    var debugSet bool
-    err = db.QueryRow(`SELECT COUNT(*) > 0 FROM settings WHERE key = 'log_level'`).Scan(&debugSet)
-    if err == nil && !debugSet {
-        // Set debug on first run only
-        _, err = db.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('log_level', 'DEBUG', ?)`, time.Now())
-        if err != nil {
-            return nil, fmt.Errorf("failed to set initial log level: %v", err)
-        }
-    }
-
     // Get or generate persistent JWT secret
     jwtSecret, err := getOrCreateJWTSecret(db)
     if err != nil {
@@ -191,6 +135,7 @@ func NewApp(dbPath string) (*App, error) {
         JWTSecret: jwtSecret,
         Logger:    logger,
         cache:     make(map[string]CacheItem),
+        clients:   make(map[int]chan string),
     }
     
     a.Logger.Info("Application initialized successfully", "dbPath", dbPath)
@@ -813,16 +758,35 @@ func isValidImageMimeType(mimeType string) bool {
     return false
 }
 
+// corsMiddleware adds CORS headers for cross-origin requests
+func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        // Set CORS headers
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+        w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+        w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+        w.Header().Set("Access-Control-Allow-Credentials", "true")
+        
+        // Handle preflight requests
+        if r.Method == http.MethodOptions {
+            w.WriteHeader(http.StatusOK)
+            return
+        }
+        
+        next(w, r)
+    }
+}
+
 func (a *App) routes() {
     mux := a.Mux
     // Health
-    mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/health", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         w.Header().Set("Content-Type", "application/json")
         _ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-    })
+    }))
 
     // Check if setup is needed
-    mux.HandleFunc("/api/setup/status", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/setup/status", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         if r.Method != http.MethodGet {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
@@ -838,10 +802,10 @@ func (a *App) routes() {
         _ = json.NewEncoder(w).Encode(map[string]bool{
             "needsSetup": !hasUsers,
         })
-    })
+    }))
 
     // User registration (only allowed if no users exist)
-    mux.HandleFunc("/api/setup/register", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/setup/register", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         if r.Method != http.MethodPost {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
@@ -901,7 +865,7 @@ func (a *App) routes() {
     })
 
     // Auth endpoints
-    mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/auth/login", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         if r.Method != http.MethodPost {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
@@ -953,7 +917,7 @@ func (a *App) routes() {
         })
     })
 
-    mux.HandleFunc("/api/auth/validate", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/auth/validate", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         if r.Method != http.MethodGet {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
@@ -988,7 +952,7 @@ func (a *App) routes() {
     })
 
     // Token refresh endpoint
-    mux.HandleFunc("/api/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/auth/refresh", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         if r.Method != http.MethodPost {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
@@ -1052,7 +1016,7 @@ func (a *App) routes() {
     })
 
     // Posts collection: POST(create) and GET(list)
-    mux.HandleFunc("/api/posts", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/posts", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         switch r.Method {
         case http.MethodPost:
             // Protect post creation
@@ -1075,6 +1039,7 @@ func (a *App) routes() {
                 w.Header().Set("Content-Type", "application/json")
                 w.WriteHeader(http.StatusCreated)
                 _ = json.NewEncoder(w).Encode(p)
+                go a.broadcast("post-created", p)
             })(w, r)
             return
         case http.MethodGet:
@@ -1085,10 +1050,7 @@ func (a *App) routes() {
             cacheKey := fmt.Sprintf("posts_list_%t", isAuth)
             if cached, found := a.cacheGet(cacheKey); found {
                 a.Logger.Debug("Serving posts from cache", "authenticated", isAuth)
-                // Set cache headers for cached responses
                 w.Header().Set("Content-Type", "application/json")
-                w.Header().Set("Cache-Control", "public, max-age=30")
-                w.Header().Set("X-Cache", "HIT")
                 _ = json.NewEncoder(w).Encode(cached)
                 return
             }
@@ -1100,13 +1062,11 @@ func (a *App) routes() {
                 return
             }
             
-            // Cache the result for 30 seconds
-            a.cacheSet(cacheKey, posts, 30*time.Second)
+            // Cache the result for 5 seconds
+            a.cacheSet(cacheKey, posts, 5*time.Second)
             
             a.Logger.Debug("Posts fetched successfully", "count", len(posts), "authenticated", isAuth)
             w.Header().Set("Content-Type", "application/json")
-            w.Header().Set("Cache-Control", "public, max-age=30")
-            w.Header().Set("X-Cache", "MISS")
             _ = json.NewEncoder(w).Encode(posts)
             return
         default:
@@ -1116,7 +1076,7 @@ func (a *App) routes() {
     })
 
     // Individual post: GET/PUT/DELETE
-    mux.HandleFunc("/api/posts/", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/posts/", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         path := strings.TrimPrefix(r.URL.Path, "/api/posts/")
         if path == "" {
             http.NotFound(w, r)
@@ -1198,6 +1158,7 @@ func (a *App) routes() {
                 
                 w.Header().Set("Content-Type", "application/json")
                 _ = json.NewEncoder(w).Encode(updatedPost)
+                go a.broadcast("post-updated", updatedPost)
             })(w, r)
             return
         }
@@ -1224,7 +1185,6 @@ func (a *App) routes() {
             }
             
             w.Header().Set("Content-Type", "application/json")
-            w.Header().Set("Cache-Control", "public, max-age=60")
             _ = json.NewEncoder(w).Encode(p)
             return
         case http.MethodPut:
@@ -1277,6 +1237,7 @@ func (a *App) routes() {
                 }
                 w.Header().Set("Content-Type", "application/json")
                 _ = json.NewEncoder(w).Encode(p)
+                go a.broadcast("post-updated", p)
             })(w, r)
             return
         case http.MethodDelete:
@@ -1288,6 +1249,7 @@ func (a *App) routes() {
                     return
                 }
                 w.WriteHeader(http.StatusNoContent)
+                go a.broadcast("post-deleted", map[string]string{"id": idStr})
             })(w, r)
             return
         default:
@@ -1297,7 +1259,7 @@ func (a *App) routes() {
     })
 
     // Settings endpoints
-    mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/settings", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         switch r.Method {
         case http.MethodGet:
             // Get all settings or specific setting by key query param
@@ -1307,8 +1269,6 @@ func (a *App) routes() {
                 cacheKey := fmt.Sprintf("setting_%s", key)
                 if cached, found := a.cacheGet(cacheKey); found {
                     w.Header().Set("Content-Type", "application/json")
-                    w.Header().Set("Cache-Control", "public, max-age=300")
-                    w.Header().Set("X-Cache", "HIT")
                     _ = json.NewEncoder(w).Encode(map[string]string{"value": cached.(string)})
                     return
                 }
@@ -1326,12 +1286,10 @@ func (a *App) routes() {
                     return
                 }
                 
-                // Cache the setting for 5 minutes
-                a.cacheSet(cacheKey, value, 5*time.Minute)
+                // Cache the setting for 30 seconds
+                a.cacheSet(cacheKey, value, 30*time.Second)
                 
                 w.Header().Set("Content-Type", "application/json")
-                w.Header().Set("Cache-Control", "public, max-age=300")
-                w.Header().Set("X-Cache", "MISS")
                 _ = json.NewEncoder(w).Encode(map[string]string{"value": value})
                 return
             }
@@ -1339,8 +1297,6 @@ func (a *App) routes() {
             // Check cache for all settings
             if cached, found := a.cacheGet("settings_all"); found {
                 w.Header().Set("Content-Type", "application/json")
-                w.Header().Set("Cache-Control", "public, max-age=300")
-                w.Header().Set("X-Cache", "HIT")
                 _ = json.NewEncoder(w).Encode(cached)
                 return
             }
@@ -1362,12 +1318,10 @@ func (a *App) routes() {
                 settings[k] = v
             }
             
-            // Cache all settings for 5 minutes
-            a.cacheSet("settings_all", settings, 5*time.Minute)
+            // Cache all settings for 30 seconds
+            a.cacheSet("settings_all", settings, 30*time.Second)
             
             w.Header().Set("Content-Type", "application/json")
-            w.Header().Set("Cache-Control", "public, max-age=300")
-            w.Header().Set("X-Cache", "MISS")
             _ = json.NewEncoder(w).Encode(settings)
             return
         case http.MethodPut:
@@ -1407,7 +1361,7 @@ func (a *App) routes() {
     })
 
     // Log level endpoint - special handling to reinitialize logger
-    mux.HandleFunc("/api/settings/log-level", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/settings/log-level", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         switch r.Method {
         case http.MethodGet:
             logLevel := getLogLevel(a.DB)
@@ -1441,7 +1395,7 @@ func (a *App) routes() {
     })
 
     // Image upload endpoint
-    mux.HandleFunc("/api/uploads", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/uploads", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         if r.Method != http.MethodPost {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
@@ -1499,7 +1453,7 @@ func (a *App) routes() {
     })
 
     // Serve uploaded files
-    mux.HandleFunc("/api/uploads/", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/uploads/", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         if r.Method != http.MethodGet {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
@@ -1534,9 +1488,58 @@ func (a *App) routes() {
         http.ServeFile(w, r, filepath)
     })
 
+    // SSE stream
+    mux.HandleFunc("/api/posts/stream", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+        flusher, ok := w.(http.Flusher)
+        if !ok {
+            http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+            return
+        }
+        w.Header().Set("Content-Type", "text/event-stream")
+        w.Header().Set("Cache-Control", "no-cache")
+        w.Header().Set("Connection", "keep-alive")
+
+        ch := make(chan string, 16)
+        id := a.addClient(ch)
+        defer a.removeClient(id)
+        
+        a.Logger.Debug("SSE client connected", "clientID", id, "remoteAddr", r.RemoteAddr)
+
+        // snapshot
+        isAuth := a.isAuthenticated(r)
+        posts, err := a.getPostsWithPrivacy(isAuth)
+        if err == nil {
+            a.Logger.Debug("Sending SSE snapshot", "clientID", id, "postCount", len(posts), "authenticated", isAuth)
+            b, _ := json.Marshal(posts)
+            _, _ = w.Write([]byte(fmt.Sprintf("event: snapshot\ndata: %s\n\n", string(b))))
+            flusher.Flush()
+        } else {
+            a.Logger.Error("Failed to fetch posts for SSE snapshot", "clientID", id, "error", err.Error())
+        }
+
+        ticker := time.NewTicker(30 * time.Second)
+        defer ticker.Stop()
+        ctx := r.Context()
+        for {
+            select {
+            case msg, ok := <-ch:
+                if !ok {
+                    return
+                }
+                _, _ = w.Write([]byte(msg))
+                flusher.Flush()
+            case <-ticker.C:
+                _, _ = w.Write([]byte("event: ping\ndata: {}\n\n"))
+                flusher.Flush()
+            case <-ctx.Done():
+                a.Logger.Debug("SSE client disconnected", "clientID", id)
+                return
+            }
+        }
+    })
 
     // About Me endpoints
-    mux.HandleFunc("/api/about", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/about", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         switch r.Method {
         case http.MethodGet:
             // Get about me content and enabled status
@@ -1597,7 +1600,7 @@ func (a *App) routes() {
     })
 
     // AI models endpoint
-    mux.HandleFunc("/api/ai/models", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/ai/models", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         if r.Method != http.MethodGet {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
@@ -1637,7 +1640,7 @@ func (a *App) routes() {
     })
 
     // AI editing endpoint
-    mux.HandleFunc("/api/ai/edit", func(w http.ResponseWriter, r *http.Request) {
+    mux.HandleFunc("/api/ai/edit", corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
         if r.Method != http.MethodPost {
             http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
             return
@@ -1767,6 +1770,37 @@ func (a *App) routes() {
     })
 }
 
+func (a *App) addClient(ch chan string) int {
+    a.clientsMu.Lock()
+    defer a.clientsMu.Unlock()
+    id := a.nextClientID
+    a.nextClientID++
+    a.clients[id] = ch
+    return id
+}
+
+func (a *App) removeClient(id int) {
+    a.clientsMu.Lock()
+    ch := a.clients[id]
+    delete(a.clients, id)
+    a.clientsMu.Unlock()
+    if ch != nil {
+        close(ch)
+    }
+}
+
+func (a *App) broadcast(event string, v any) {
+    b, _ := json.Marshal(v)
+    msg := fmt.Sprintf("event: %s\ndata: %s\n\n", event, string(b))
+    a.clientsMu.Lock()
+    for _, ch := range a.clients {
+        select {
+        case ch <- msg:
+        default:
+        }
+    }
+    a.clientsMu.Unlock()
+}
 
 func (a *App) isAuthenticated(r *http.Request) bool {
     authHeader := r.Header.Get("Authorization")

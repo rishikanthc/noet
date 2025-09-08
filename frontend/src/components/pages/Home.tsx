@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../../hooks/useAuth";
+import { usePosts } from "../../hooks/usePostsNew";
 import { useSettings } from "../../hooks/useSettings";
+import { useCreatePost } from "../../hooks/usePostsQuery";
 import { Header } from "../layout/Header";
 import { ContextMenu } from "../common/ContextMenu";
 import { ConfirmDialog } from "../common/ConfirmDialog";
@@ -10,82 +12,16 @@ import { formatDate } from "../../utils";
 
 export function Home() {
 	const { isAuthenticated, logout, token } = useAuth();
+	const { posts, loading, error, deletePost, togglePrivacy } = usePosts(token);
 	const { settings } = useSettings();
-	const [posts, setPosts] = useState<Note[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | undefined>();
-	
-	// Simple fetch approach like Archive page
-	useEffect(() => {
-		const load = async () => {
-			try {
-				const res = await fetch("/api/posts", {
-					headers: token ? { Authorization: `Bearer ${token}` } : {}
-				});
-				if (res.ok) {
-					const list: Note[] = await res.json();
-					// Handle null/undefined response
-					const posts = list || [];
-					const sorted = [...posts].sort((a, b) => {
-						const au = a.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-						const bu = b.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-						return bu - au;
-					}).slice(0, 10); // Show only latest 10 posts on homepage
-					setPosts(sorted);
-				} else {
-					if (res.status >= 500) {
-						setError("Failed to load posts");
-					} else {
-						setPosts([]);
-					}
-				}
-			} catch (e) {
-				console.error("Home: Failed to load posts", e);
-				setError("Failed to load posts");
-			} finally {
-				setLoading(false);
-			}
-		};
-		
-		load();
-	}, [token]);
-	
-	const deletePost = useCallback(async (postId: number) => {
-		if (!token) return;
-		try {
-			const res = await fetch(`/api/posts/${postId}`, {
-				method: "DELETE",
-				headers: { Authorization: `Bearer ${token}` },
-			});
-			if (!res.ok) throw new Error(`Failed to delete post: ${res.status}`);
-			setPosts((prev) => prev.filter((p) => p.id !== postId));
-		} catch (e) {
-			alert("Failed to delete post");
-		}
-	}, [token]);
-
-	const togglePrivacy = useCallback(async (postId: number) => {
-		if (!token) return;
-		
-		try {
-			const res = await fetch(`/api/posts/${postId}/publish`, {
-				method: 'PUT',
-				headers: { Authorization: `Bearer ${token}` },
-			});
-			
-			if (res.ok) {
-				const updatedPost = await res.json();
-				setPosts(prev => prev.map(p => p.id === postId ? updatedPost : p));
-			}
-		} catch (error) {
-			console.error("Home: Failed to toggle post privacy", { postId, error });
-		}
-	}, [token]);
-	
+	const createPostMutation = useCreatePost();
 	const [creating, setCreating] = useState(false);
 	const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
 	const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null);
 	const [togglingPrivacy, setTogglingPrivacy] = useState<number | null>(null);
+	
+	// Show only latest 10 posts on homepage
+	const latestPosts = posts.slice(0, 10);
 
 	const handlePrivacyToggle = useCallback(async (postId: number) => {
 		if (!isAuthenticated || !token) return;
@@ -109,15 +45,10 @@ export function Home() {
 
 
 	const handleNewPost = useCallback(async () => {
-		if (creating || !isAuthenticated) return;
+		if (creating || !isAuthenticated || !token) return;
 		setCreating(true);
 		try {
-			const res = await fetch("/api/posts", {
-				method: "POST",
-				headers: token ? { Authorization: `Bearer ${token}` } : {},
-			});
-			if (!res.ok) throw new Error(`Failed to create note: ${res.status}`);
-			const note = await res.json();
+			const note = await createPostMutation.mutateAsync({ token });
 			window.location.assign(`/posts/${note.id}`);
 		} catch (e) {
 			console.error("Home: Failed to create new post", e);
@@ -125,7 +56,7 @@ export function Home() {
 		} finally {
 			setCreating(false);
 		}
-	}, [creating, isAuthenticated, token]);
+	}, [creating, isAuthenticated, token, createPostMutation]);
 
 	const handleRightClick = useCallback((e: React.MouseEvent, postId: number) => {
 		if (!isAuthenticated) return;
@@ -181,11 +112,11 @@ export function Home() {
 				{error && <p>{error}</p>}
 				{!loading &&
 					!error &&
-					(posts.length === 0 ? (
+					(latestPosts.length === 0 ? (
 						<p>No posts yet.</p>
 					) : (
 						<ul className="post-list">
-							{posts.map((p) => (
+							{latestPosts.map((p) => (
 								<li key={p.id}>
 									<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
 										{isAuthenticated && (
@@ -233,7 +164,7 @@ export function Home() {
 					x={contextMenu.x}
 					y={contextMenu.y}
 					onDelete={() => {
-						const post = posts.find((p) => p.id === contextMenu.postId);
+						const post = latestPosts.find((p) => p.id === contextMenu.postId);
 						const title =
 							post?.title && post.title.trim() ? post.title : "Untitled";
 						handleDeleteClick(contextMenu.postId, title);
