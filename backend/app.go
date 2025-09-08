@@ -117,6 +117,17 @@ func NewApp(dbPath string) (*App, error) {
         return nil, err
     }
 
+    // Check if debug logging should be enabled (only set once, not forced)
+    var debugSet bool
+    err = db.QueryRow(`SELECT COUNT(*) > 0 FROM settings WHERE key = 'log_level'`).Scan(&debugSet)
+    if err == nil && !debugSet {
+        // Set debug on first run only
+        _, err = db.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('log_level', 'DEBUG', ?)`, time.Now())
+        if err != nil {
+            return nil, fmt.Errorf("failed to set initial log level: %v", err)
+        }
+    }
+
     // Get or generate persistent JWT secret
     jwtSecret, err := getOrCreateJWTSecret(db)
     if err != nil {
@@ -1469,51 +1480,179 @@ func (a *App) routes() {
         http.ServeFile(w, r, filepath)
     })
 
-    // SSE stream
-    mux.HandleFunc("/api/posts/stream", func(w http.ResponseWriter, r *http.Request) {
+    // Simple SSE test endpoint
+    mux.HandleFunc("/api/test/sse", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        
+        a.Logger.Debug("TEST SSE: Connection attempt", "remoteAddr", r.RemoteAddr)
+        
         flusher, ok := w.(http.Flusher)
         if !ok {
             http.Error(w, "streaming unsupported", http.StatusInternalServerError)
             return
         }
+        
         w.Header().Set("Content-Type", "text/event-stream")
         w.Header().Set("Cache-Control", "no-cache")
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+        w.WriteHeader(http.StatusOK)
+        
+        // Send immediate test data
+        for i := 0; i < 5; i++ {
+            msg := fmt.Sprintf("data: Test message %d\n\n", i)
+            n, err := w.Write([]byte(msg))
+            if err != nil {
+                a.Logger.Error("TEST SSE: Write failed", "error", err)
+                return
+            }
+            a.Logger.Debug("TEST SSE: Wrote message", "i", i, "bytes", n)
+            flusher.Flush()
+            time.Sleep(1 * time.Second)
+        }
+        
+        a.Logger.Debug("TEST SSE: Completed")
+    })
+
+    // SSE stream
+    mux.HandleFunc("/api/posts/stream", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodGet {
+            a.Logger.Debug("SSE: Invalid method", "method", r.Method)
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+        
+        a.Logger.Debug("SSE connection attempt", 
+            "method", r.Method, 
+            "remoteAddr", r.RemoteAddr, 
+            "userAgent", r.UserAgent(), 
+            "origin", r.Header.Get("Origin"),
+            "protocol", r.Proto,
+            "headers", r.Header)
+        
+        flusher, ok := w.(http.Flusher)
+        if !ok {
+            a.Logger.Error("SSE streaming not supported by response writer")
+            http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+            return
+        }
+        
+        // Set SSE headers - order matters for HTTP/2
+        w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+        w.Header().Set("Cache-Control", "no-cache")
         w.Header().Set("Connection", "keep-alive")
+        
+        // CORS headers
+        w.Header().Set("Access-Control-Allow-Origin", "*")
+        w.Header().Set("Access-Control-Allow-Headers", "Cache-Control, Last-Event-ID")
+        
+        // HTTP/2 compatibility - don't set Connection header for HTTP/2
+        if r.ProtoMajor < 2 {
+            w.Header().Set("Connection", "keep-alive")
+        }
+        
+        // Disable buffering
+        w.Header().Set("X-Accel-Buffering", "no")
+        
+        a.Logger.Debug("SSE: Headers set, writing response")
+        
+        // Write status header
+        w.WriteHeader(http.StatusOK)
+        
+        // For HTTP/2, start with smaller initial content
+        initialData := ": SSE stream starting\n\n"
+        n, err := w.Write([]byte(initialData))
+        if err != nil {
+            a.Logger.Error("SSE: Failed to write initial data", "error", err, "bytesWritten", n)
+            return
+        }
+        a.Logger.Debug("SSE: Wrote initial data", "bytes", n)
+        flusher.Flush()
+        
+        // Send ready event
+        readyEvent := "event: ready\ndata: {\"status\":\"connected\"}\n\n"
+        n, err = w.Write([]byte(readyEvent))
+        if err != nil {
+            a.Logger.Error("SSE: Failed to write ready event", "error", err, "bytesWritten", n)
+            return
+        }
+        a.Logger.Debug("SSE: Wrote ready event", "bytes", n)
+        flusher.Flush()
 
         ch := make(chan string, 16)
         id := a.addClient(ch)
         defer a.removeClient(id)
         
-        a.Logger.Debug("SSE client connected", "clientID", id, "remoteAddr", r.RemoteAddr)
+        a.Logger.Debug("SSE client registered", "clientID", id, "remoteAddr", r.RemoteAddr)
 
-        // snapshot
+        // Send snapshot - always use the authentication status from the request
         isAuth := a.isAuthenticated(r)
+        a.Logger.Debug("SSE: Authentication check", "clientID", id, "isAuthenticated", isAuth)
+        
         posts, err := a.getPostsWithPrivacy(isAuth)
         if err == nil {
-            a.Logger.Debug("Sending SSE snapshot", "clientID", id, "postCount", len(posts), "authenticated", isAuth)
-            b, _ := json.Marshal(posts)
-            _, _ = w.Write([]byte(fmt.Sprintf("event: snapshot\ndata: %s\n\n", string(b))))
-            flusher.Flush()
+            a.Logger.Debug("SSE: Preparing snapshot", "clientID", id, "postCount", len(posts), "authenticated", isAuth)
+            b, err := json.Marshal(posts)
+            if err != nil {
+                a.Logger.Error("SSE: Failed to marshal posts", "clientID", id, "error", err)
+            } else {
+                snapshot := fmt.Sprintf("event: snapshot\ndata: %s\n\n", string(b))
+                n, err := w.Write([]byte(snapshot))
+                if err != nil {
+                    a.Logger.Error("SSE: Failed to write snapshot", "clientID", id, "error", err, "bytesWritten", n)
+                    return
+                }
+                a.Logger.Debug("SSE: Wrote snapshot", "clientID", id, "bytes", n, "dataLength", len(string(b)))
+                flusher.Flush()
+            }
         } else {
-            a.Logger.Error("Failed to fetch posts for SSE snapshot", "clientID", id, "error", err.Error())
+            a.Logger.Error("SSE: Failed to fetch posts for snapshot", "clientID", id, "error", err.Error())
+            // Send empty snapshot so client doesn't hang
+            emptySnapshot := "event: snapshot\ndata: []\n\n"
+            n, err := w.Write([]byte(emptySnapshot))
+            if err != nil {
+                a.Logger.Error("SSE: Failed to write empty snapshot", "clientID", id, "error", err, "bytesWritten", n)
+                return
+            }
+            a.Logger.Debug("SSE: Wrote empty snapshot", "clientID", id, "bytes", n)
+            flusher.Flush()
         }
 
+        // Heartbeat every 30 seconds
         ticker := time.NewTicker(30 * time.Second)
         defer ticker.Stop()
         ctx := r.Context()
+        
+        a.Logger.Debug("SSE: Entering event loop", "clientID", id)
         for {
             select {
             case msg, ok := <-ch:
                 if !ok {
+                    a.Logger.Debug("SSE: Client channel closed", "clientID", id)
                     return
                 }
-                _, _ = w.Write([]byte(msg))
+                n, err := w.Write([]byte(msg))
+                if err != nil {
+                    a.Logger.Error("SSE: Failed to write message", "clientID", id, "error", err, "bytesWritten", n)
+                    return
+                }
+                a.Logger.Debug("SSE: Wrote message", "clientID", id, "bytes", n)
                 flusher.Flush()
+                
             case <-ticker.C:
-                _, _ = w.Write([]byte("event: ping\ndata: {}\n\n"))
+                heartbeat := fmt.Sprintf("event: heartbeat\ndata: {\"timestamp\":%d}\n\n", time.Now().Unix())
+                n, err := w.Write([]byte(heartbeat))
+                if err != nil {
+                    a.Logger.Error("SSE: Failed to write heartbeat", "clientID", id, "error", err, "bytesWritten", n)
+                    return
+                }
+                a.Logger.Debug("SSE: Wrote heartbeat", "clientID", id, "bytes", n)
                 flusher.Flush()
+                
             case <-ctx.Done():
-                a.Logger.Debug("SSE client disconnected", "clientID", id)
+                a.Logger.Debug("SSE: Context cancelled", "clientID", id, "error", ctx.Err())
                 return
             }
         }
