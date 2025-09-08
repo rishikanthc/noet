@@ -94,40 +94,36 @@ export function PostEditor({ id }: PostEditorProps) {
 
 	useEffect(() => {
 		let cancelled = false;
-		const load = async () => {
+		const loadAllData = async () => {
 			try {
-				const res = await fetch(`/api/posts/${id}`, {
-					headers: token ? { Authorization: `Bearer ${token}` } : {}
-				});
-				if (!res.ok) throw new Error(`Failed to load note: ${res.status}`);
-				const note = await res.json();
-				if (!cancelled) {
-					setContent(note.content || "");
-					latestContentRef.current = note.content || "";
-					setDirty(false);
-				}
-			} catch (e: any) {
-				if (!cancelled) setError(e?.message || "Failed to load note");
-			} finally {
-				if (!cancelled) setLoading(false);
-			}
-		};
-		load();
-		return () => {
-			cancelled = true;
-		};
-	}, [id, token]);
+				// Load post content, post mentions, and backlinks in parallel
+				const [postRes, postsRes, backlinksRes] = await Promise.all([
+					fetch(`/api/posts/${id}`, {
+						headers: token ? { Authorization: `Bearer ${token}` } : {}
+					}),
+					fetch("/api/posts", {
+						headers: token ? { Authorization: `Bearer ${token}` } : {}
+					}),
+					fetch(`/api/posts/${id}/backlinks`, {
+						headers: token ? { Authorization: `Bearer ${token}` } : {}
+					})
+				]);
 
-	useEffect(() => {
-		// Load post mentions
-		const loadPostMentions = async () => {
-			try {
-				const res = await fetch("/api/posts", {
-					headers: token ? { Authorization: `Bearer ${token}` } : {}
-				});
-				if (res.ok) {
-					const posts: Note[] = await res.json();
-					// Convert posts to mention items, excluding current post
+				// Handle post content
+				if (postRes.ok) {
+					const note = await postRes.json();
+					if (!cancelled) {
+						setContent(note.content || "");
+						latestContentRef.current = note.content || "";
+						setDirty(false);
+					}
+				} else {
+					throw new Error(`Failed to load note: ${postRes.status}`);
+				}
+
+				// Handle post mentions
+				if (postsRes.ok) {
+					const posts: Note[] = await postsRes.json();
 					const mentions: MentionItem[] = posts
 						.filter(post => post.id.toString() !== id)
 						.map(post => ({
@@ -135,20 +131,35 @@ export function PostEditor({ id }: PostEditorProps) {
 							label: post.title && post.title.trim() ? post.title : `Untitled Post ${post.id}`,
 							url: `/posts/${post.id}`
 						}));
-					setPostMentions(mentions);
+					if (!cancelled) setPostMentions(mentions);
 				} else {
-					setPostMentions([]);
+					if (!cancelled) setPostMentions([]);
 				}
-			} catch (e) {
-				setPostMentions([]);
+
+				// Handle backlinks
+				if (backlinksRes.ok) {
+					const backlinksData: Note[] = await backlinksRes.json();
+					if (!cancelled) setBacklinks(backlinksData);
+				} else {
+					if (!cancelled) setBacklinks([]);
+				}
+
+			} catch (e: any) {
+				if (!cancelled) setError(e?.message || "Failed to load note");
 			} finally {
-				setMentionsLoaded(true);
+				if (!cancelled) {
+					setLoading(false);
+					setMentionsLoaded(true);
+					setBacklinksLoading(false);
+				}
 			}
 		};
 
-		loadPostMentions();
-		loadBacklinks();
-	}, [id, loadBacklinks, token]);
+		loadAllData();
+		return () => {
+			cancelled = true;
+		};
+	}, [id, token]);
 
 	if (loading || !mentionsLoaded)
 		return (

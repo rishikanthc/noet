@@ -18,10 +18,14 @@ export function Settings() {
 	useEffect(() => {
 		const loadSettings = async () => {
 			try {
-				// Load all settings
-				const res = await fetch("/api/settings");
-				if (res.ok) {
-					const data = await res.json();
+				// Load settings and log level in parallel
+				const [settingsRes, logRes] = await Promise.all([
+					fetch("/api/settings"),
+					fetch("/api/settings/log-level")
+				]);
+				
+				if (settingsRes.ok) {
+					const data = await settingsRes.json();
 					setIntroText(data.introText || "");
 					setSiteTitle(data.siteTitle || "");
 					setHeroImage(data.heroImage || "");
@@ -30,8 +34,6 @@ export function Settings() {
 					setAiEnabled(data.ai_enabled === "true");
 				}
 				
-				// Load log level separately
-				const logRes = await fetch("/api/settings/log-level");
 				if (logRes.ok) {
 					const logData = await logRes.json();
 					setLogLevel(logData.level || "INFO");

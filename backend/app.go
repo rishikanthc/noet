@@ -10,6 +10,7 @@ import (
     "encoding/json"
     "errors"
     "fmt"
+    "hash/fnv"
     "io"
     "log/slog"
     "mime"
@@ -32,11 +33,21 @@ import (
 //go:embed static/*
 var staticFS embed.FS
 
+// CacheItem represents a cached item with expiration
+type CacheItem struct {
+    Data      interface{}
+    ExpiresAt time.Time
+}
+
 type App struct {
     DB        *sql.DB
     Mux       *http.ServeMux
     JWTSecret []byte
     Logger    *slog.Logger
+
+    // Simple in-memory cache
+    cacheMu sync.RWMutex
+    cache   map[string]CacheItem
 
     // SSE
     clientsMu    sync.Mutex
@@ -80,10 +91,25 @@ func NewApp(dbPath string) (*App, error) {
     if err != nil {
         return nil, err
     }
-    // Pragmas for reliability
-    if _, err := db.Exec(`PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;`); err != nil {
+    // Pragmas for reliability and performance
+    pragmas := `
+        PRAGMA journal_mode=WAL;
+        PRAGMA foreign_keys=ON;
+        PRAGMA synchronous=NORMAL;
+        PRAGMA cache_size=10000;
+        PRAGMA busy_timeout=5000;
+        PRAGMA temp_store=memory;
+        PRAGMA mmap_size=268435456;
+    `
+    if _, err := db.Exec(pragmas); err != nil {
         return nil, err
     }
+    
+    // Configure connection pool for performance
+    db.SetMaxOpenConns(25)
+    db.SetMaxIdleConns(25)
+    db.SetConnMaxLifetime(5 * time.Minute)
+    
     if err := initSchema(db); err != nil {
         return nil, err
     }
@@ -108,6 +134,7 @@ func NewApp(dbPath string) (*App, error) {
         Mux:       http.NewServeMux(), 
         JWTSecret: jwtSecret,
         Logger:    logger,
+        cache:     make(map[string]CacheItem),
         clients:   make(map[int]chan string),
     }
     
@@ -170,6 +197,13 @@ CREATE TABLE IF NOT EXISTS post_links (
 
 CREATE INDEX IF NOT EXISTS idx_post_links_source ON post_links(source_post_id);
 CREATE INDEX IF NOT EXISTS idx_post_links_target ON post_links(target_post_id);
+
+-- Performance indexes for posts table
+CREATE INDEX IF NOT EXISTS idx_posts_updated_at ON posts(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_created_at ON posts(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_posts_is_private ON posts(is_private);
+-- Composite index for optimal query performance
+CREATE INDEX IF NOT EXISTS idx_posts_privacy_updated ON posts(is_private, updated_at DESC, created_at DESC);
 `)
     return err
 }
@@ -186,6 +220,70 @@ func runMigrations(db *sql.DB) error {
         }
     }
     return nil
+}
+
+// generateETag generates an ETag for file content
+func generateETag(data []byte) string {
+    h := fnv.New32a()
+    h.Write(data)
+    return fmt.Sprintf(`"%x"`, h.Sum32())
+}
+
+// isStaticAsset checks if the file is a static asset that should be cached long-term
+func isStaticAsset(path string) bool {
+    ext := strings.ToLower(filepath.Ext(path))
+    return ext == ".js" || ext == ".css" || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".svg" || ext == ".ico" || ext == ".woff" || ext == ".woff2" || ext == ".ttf"
+}
+
+// setStaticCacheHeaders sets appropriate cache headers for static files
+func setStaticCacheHeaders(w http.ResponseWriter, path string, etag string) {
+    if isStaticAsset(path) {
+        // Static assets - cache for 1 year
+        w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+    } else {
+        // HTML files - cache for 5 minutes
+        w.Header().Set("Cache-Control", "public, max-age=300")
+    }
+    w.Header().Set("ETag", etag)
+}
+
+// Cache helper methods
+func (a *App) cacheGet(key string) (interface{}, bool) {
+    a.cacheMu.RLock()
+    defer a.cacheMu.RUnlock()
+    
+    item, exists := a.cache[key]
+    if !exists || time.Now().After(item.ExpiresAt) {
+        return nil, false
+    }
+    return item.Data, true
+}
+
+func (a *App) cacheSet(key string, data interface{}, duration time.Duration) {
+    a.cacheMu.Lock()
+    defer a.cacheMu.Unlock()
+    
+    a.cache[key] = CacheItem{
+        Data:      data,
+        ExpiresAt: time.Now().Add(duration),
+    }
+}
+
+func (a *App) cacheDelete(key string) {
+    a.cacheMu.Lock()
+    defer a.cacheMu.Unlock()
+    delete(a.cache, key)
+}
+
+func (a *App) cacheInvalidatePattern(pattern string) {
+    a.cacheMu.Lock()
+    defer a.cacheMu.Unlock()
+    
+    for key := range a.cache {
+        if strings.Contains(key, pattern) {
+            delete(a.cache, key)
+        }
+    }
 }
 
 func getOrCreateJWTSecret(db *sql.DB) ([]byte, error) {
@@ -915,6 +1013,10 @@ func (a *App) routes() {
                 id, _ := res.LastInsertId()
                 p := Post{ID: id, Title: nil, Content: "", CreatedAt: now, UpdatedAt: now, IsPrivate: true}
                 a.Logger.Info("Post created successfully", "postID", id, "isPrivate", p.IsPrivate)
+                
+                // Invalidate posts cache
+                a.cacheInvalidatePattern("posts_list_")
+                
                 w.Header().Set("Content-Type", "application/json")
                 w.WriteHeader(http.StatusCreated)
                 _ = json.NewEncoder(w).Encode(p)
@@ -924,12 +1026,26 @@ func (a *App) routes() {
         case http.MethodGet:
             isAuth := a.isAuthenticated(r)
             a.Logger.Debug("Fetching posts list", "authenticated", isAuth)
+            
+            // Check cache first
+            cacheKey := fmt.Sprintf("posts_list_%t", isAuth)
+            if cached, found := a.cacheGet(cacheKey); found {
+                a.Logger.Debug("Serving posts from cache", "authenticated", isAuth)
+                w.Header().Set("Content-Type", "application/json")
+                _ = json.NewEncoder(w).Encode(cached)
+                return
+            }
+            
             posts, err := a.getPostsWithPrivacy(isAuth)
             if err != nil {
                 a.Logger.Error("Failed to fetch posts from database", "error", err.Error())
                 http.Error(w, "db error", http.StatusInternalServerError)
                 return
             }
+            
+            // Cache the result for 5 seconds
+            a.cacheSet(cacheKey, posts, 5*time.Second)
+            
             a.Logger.Debug("Posts fetched successfully", "count", len(posts), "authenticated", isAuth)
             w.Header().Set("Content-Type", "application/json")
             _ = json.NewEncoder(w).Encode(posts)
@@ -1016,6 +1132,11 @@ func (a *App) routes() {
                 }
                 
                 a.Logger.Info("Post privacy toggled successfully", "postID", idStr, "isPrivate", updatedPost.IsPrivate)
+                
+                // Invalidate posts cache
+                a.cacheInvalidatePattern("posts_list_")
+                a.cacheDelete(fmt.Sprintf("post_%s", idStr))
+                
                 w.Header().Set("Content-Type", "application/json")
                 _ = json.NewEncoder(w).Encode(updatedPost)
                 go a.broadcast("post-updated", updatedPost)
@@ -1073,6 +1194,10 @@ func (a *App) routes() {
                 
                 a.Logger.Info("Post updated successfully", "postID", idStr, "title", title)
                 
+                // Invalidate posts cache
+                a.cacheInvalidatePattern("posts_list_")
+                a.cacheDelete(fmt.Sprintf("post_%s", idStr))
+                
                 // Parse post ID and update bi-directional links
                 if postID, parseErr := strconv.ParseInt(idStr, 10, 64); parseErr == nil {
                     if linkErr := a.updatePostLinks(postID, payload.Content); linkErr != nil {
@@ -1121,6 +1246,14 @@ func (a *App) routes() {
             // Get all settings or specific setting by key query param
             key := r.URL.Query().Get("key")
             if key != "" {
+                // Check cache first for specific setting
+                cacheKey := fmt.Sprintf("setting_%s", key)
+                if cached, found := a.cacheGet(cacheKey); found {
+                    w.Header().Set("Content-Type", "application/json")
+                    _ = json.NewEncoder(w).Encode(map[string]string{"value": cached.(string)})
+                    return
+                }
+                
                 // Get specific setting
                 var value string
                 err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
@@ -1133,10 +1266,22 @@ func (a *App) routes() {
                     http.Error(w, "db error", http.StatusInternalServerError)
                     return
                 }
+                
+                // Cache the setting for 30 seconds
+                a.cacheSet(cacheKey, value, 30*time.Second)
+                
                 w.Header().Set("Content-Type", "application/json")
                 _ = json.NewEncoder(w).Encode(map[string]string{"value": value})
                 return
             }
+            
+            // Check cache for all settings
+            if cached, found := a.cacheGet("settings_all"); found {
+                w.Header().Set("Content-Type", "application/json")
+                _ = json.NewEncoder(w).Encode(cached)
+                return
+            }
+            
             // Get all settings
             rows, err := a.DB.Query(`SELECT key, value FROM settings`)
             if err != nil {
@@ -1153,6 +1298,10 @@ func (a *App) routes() {
                 }
                 settings[k] = v
             }
+            
+            // Cache all settings for 30 seconds
+            a.cacheSet("settings_all", settings, 30*time.Second)
+            
             w.Header().Set("Content-Type", "application/json")
             _ = json.NewEncoder(w).Encode(settings)
             return
@@ -1177,6 +1326,11 @@ func (a *App) routes() {
                     http.Error(w, "db error", http.StatusInternalServerError)
                     return
                 }
+                
+                // Invalidate settings cache
+                a.cacheDelete("settings_all")
+                a.cacheDelete(fmt.Sprintf("setting_%s", payload.Key))
+                
                 w.Header().Set("Content-Type", "application/json")
                 _ = json.NewEncoder(w).Encode(map[string]string{"key": payload.Key, "value": payload.Value})
             })(w, r)
@@ -1491,25 +1645,57 @@ func (a *App) routes() {
                 http.Error(w, "index not found", http.StatusNotFound)
                 return
             }
+            
+            etag := generateETag(data)
+            setStaticCacheHeaders(w, "index.html", etag)
+            
+            // Check if client has cached version
+            if r.Header.Get("If-None-Match") == etag {
+                w.WriteHeader(http.StatusNotModified)
+                return
+            }
+            
             w.Header().Set("Content-Type", "text/html; charset=utf-8")
             w.WriteHeader(http.StatusOK)
             _, _ = w.Write(data)
             return
         }
+        
         reqPath := strings.TrimPrefix(path.Clean(p), "/")
         fp := filepath.Join("static", reqPath)
         data, err := staticFS.ReadFile(fp)
         if err != nil {
+            // Fallback to index.html for SPA routing
             index, ierr := staticFS.ReadFile("static/index.html")
             if ierr != nil {
                 http.NotFound(w, r)
                 return
             }
+            
+            etag := generateETag(index)
+            setStaticCacheHeaders(w, "index.html", etag)
+            
+            // Check if client has cached version
+            if r.Header.Get("If-None-Match") == etag {
+                w.WriteHeader(http.StatusNotModified)
+                return
+            }
+            
             w.Header().Set("Content-Type", "text/html; charset=utf-8")
             w.WriteHeader(http.StatusOK)
             _, _ = w.Write(index)
             return
         }
+        
+        etag := generateETag(data)
+        setStaticCacheHeaders(w, reqPath, etag)
+        
+        // Check if client has cached version
+        if r.Header.Get("If-None-Match") == etag {
+            w.WriteHeader(http.StatusNotModified)
+            return
+        }
+        
         if ctype := mime.TypeByExtension(filepath.Ext(fp)); ctype != "" {
             w.Header().Set("Content-Type", ctype)
         }
