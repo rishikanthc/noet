@@ -115,29 +115,21 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 
 		const handleApplyEdit = useCallback((editedText: string) => {
 			if (!savedSelection || !editorRef.current?.editor) {
-				console.warn('No saved selection or editor available');
 				return;
 			}
 
 			const editor = editorRef.current.editor;
 			
-			// Simple approach: find the original text in the editor and replace it
 			try {
-				const currentContent = editor.getHTML();
 				const originalText = savedSelection.text;
-				
-				console.log('Attempting to replace:', originalText);
-				console.log('With:', editedText);
 				
 				// Parse markdown to HTML
 				const htmlContent = parseMarkdownToHTML(editedText);
-				console.log('Parsed HTML:', htmlContent);
 				
-				// Try to find and replace the text using editor's built-in search and replace
+				// Search for the original text in the document
 				const { state } = editor;
 				const { doc } = state;
 				
-				// Search for the original text in the document
 				let foundPos = null;
 				doc.descendants((node, pos) => {
 					if (node.isText && node.text?.includes(originalText)) {
@@ -151,8 +143,6 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 				});
 				
 				if (foundPos) {
-					console.log('Found text at position:', foundPos);
-					
 					// Replace the content
 					editor
 						.chain()
@@ -161,11 +151,7 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 						.deleteSelection()
 						.insertContent(htmlContent)
 						.run();
-						
-					console.log('Content replaced successfully');
 				} else {
-					console.warn('Could not find original text in document, using fallback');
-					
 					// Fallback: just insert at current cursor position
 					editor
 						.chain()
@@ -174,8 +160,6 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 						.run();
 				}
 			} catch (error) {
-				console.error('Error in handleApplyEdit:', error);
-				
 				// Final fallback - just insert the content
 				try {
 					editor
@@ -184,7 +168,7 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 						.insertContent(editedText)
 						.run();
 				} catch (finalError) {
-					console.error('All approaches failed:', finalError);
+					// Silent fallback
 				}
 			}
 			
