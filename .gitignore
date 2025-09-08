@@ -20,3 +20,7 @@ backend/noet-server
 backend/backend
 backend/static
 backend/static
+data
+README.Docker.md
+frontend
+pic.png
