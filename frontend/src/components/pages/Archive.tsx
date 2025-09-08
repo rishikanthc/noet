@@ -8,6 +8,8 @@ import { ConfirmDialog } from "../common/ConfirmDialog";
 import { PrivacyToggle } from "../common/PrivacyToggle";
 import { type Note, type ContextMenuState, type ConfirmDialogState } from "../../types";
 import { formatDate, fuzzySearch } from "../../utils";
+import { navigateTo } from "../../lib/router";
+import { Link } from "../common/Link";
 
 export function Archive() {
 	const { isAuthenticated, logout, token } = useAuth();
@@ -75,7 +77,7 @@ export function Archive() {
 				siteTitle={settings.siteTitle}
 				isAuthenticated={isAuthenticated}
 				onLogout={logout}
-				onSettings={() => window.location.assign("/settings")}
+				onSettings={() => navigateTo("/settings")}
 				aboutEnabled={settings.aboutEnabled}
 			/>
 			<div className="home-content">
@@ -105,7 +107,7 @@ export function Archive() {
 						<ul className="post-list">
 							{filteredPosts.map((p) => (
 								<li key={p.id}>
-									<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+									<div style={{ display: "flex", alignItems: "center", gap: "8px" }} onContextMenu={(e) => handleRightClick(e, p.id)}>
 										{isAuthenticated && (
 											<PrivacyToggle
 												postId={p.id}
@@ -117,10 +119,9 @@ export function Archive() {
 												isToggling={togglingPrivacy === p.id}
 											/>
 										)}
-										<a
+										<Link
 											href={`/posts/${p.id}`}
 											className="post-link group"
-											onContextMenu={(e) => handleRightClick(e, p.id)}
 											style={{ flex: 1 }}
 										>
 											<span className="post-title group-underline">
@@ -131,7 +132,7 @@ export function Archive() {
 													— {formatDate(p.updatedAt)}
 												</span>
 											)}
-										</a>
+										</Link>
 									</div>
 								</li>
 							))}

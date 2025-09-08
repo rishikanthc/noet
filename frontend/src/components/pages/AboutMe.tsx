@@ -9,6 +9,8 @@ import { useSettings } from "../../hooks/useSettings";
 import { Header } from "../layout/Header";
 import { AIEnabledEditor } from "../common/AIEnabledEditor";
 import { type Note } from "../../types";
+import { navigateTo } from "../../lib/router";
+import { Link } from "../common/Link";
 
 export function AboutMe() {
 	const { isAuthenticated, token, logout } = useAuth();
@@ -111,13 +113,13 @@ export function AboutMe() {
 					siteTitle={settings.siteTitle}
 					isAuthenticated={isAuthenticated}
 					onLogout={logout}
-					onSettings={() => window.location.assign("/settings")}
+					onSettings={() => navigateTo("/settings")}
 					aboutEnabled={settings.aboutEnabled}
 				/>
 				<div className="home-content">
 					<h1>Page Not Found</h1>
 					<p>The page you're looking for doesn't exist.</p>
-					<a href="/">← Go back home</a>
+					<Link href="/">← Go back home</Link>
 				</div>
 			</div>
 		);
@@ -142,7 +144,7 @@ export function AboutMe() {
 				siteTitle={settings.siteTitle}
 				isAuthenticated={isAuthenticated}
 				onLogout={logout}
-				onSettings={() => window.location.assign("/settings")}
+				onSettings={() => navigateTo("/settings")}
 				aboutEnabled={settings.aboutEnabled}
 			/>
 			{dirty && (

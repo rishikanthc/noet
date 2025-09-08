@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { usePosts } from "../../hooks/usePostsNew";
 import { useSettings } from "../../hooks/useSettings";
@@ -9,8 +9,10 @@ import { ConfirmDialog } from "../common/ConfirmDialog";
 import { PrivacyToggle } from "../common/PrivacyToggle";
 import { type Note, type ContextMenuState, type ConfirmDialogState } from "../../types";
 import { formatDate } from "../../utils";
+import { navigateTo } from "../../lib/router";
+import { Link } from "../common/Link";
 
-export function Home() {
+export const Home = memo(function Home() {
 	const { isAuthenticated, logout, token } = useAuth();
 	const { posts, loading, error, deletePost, togglePrivacy } = usePosts(token);
 	const { settings } = useSettings();
@@ -37,7 +39,7 @@ export function Home() {
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			const k = e.key.toLowerCase();
-			if (k === "h") window.location.assign("/");
+			if (k === "h") navigateTo("/");
 		};
 		window.addEventListener("keydown", onKey);
 		return () => window.removeEventListener("keydown", onKey);
@@ -49,7 +51,7 @@ export function Home() {
 		setCreating(true);
 		try {
 			const note = await createPostMutation.mutateAsync({ token });
-			window.location.assign(`/posts/${note.id}`);
+			navigateTo(`/posts/${note.id}`);
 		} catch (e) {
 			console.error("Home: Failed to create new post", e);
 			alert("Failed to create a new post");
@@ -82,7 +84,7 @@ export function Home() {
 				siteTitle={settings.siteTitle}
 				isAuthenticated={isAuthenticated}
 				onLogout={logout}
-				onSettings={() => window.location.assign("/settings")}
+				onSettings={() => navigateTo("/settings")}
 				onNewPost={handleNewPost}
 				creating={creating}
 				aboutEnabled={settings.aboutEnabled}
@@ -118,7 +120,7 @@ export function Home() {
 						<ul className="post-list">
 							{latestPosts.map((p) => (
 								<li key={p.id}>
-									<div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+									<div style={{ display: "flex", alignItems: "center", gap: "8px" }} onContextMenu={(e) => handleRightClick(e, p.id)}>
 										{isAuthenticated && (
 											<PrivacyToggle
 												postId={p.id}
@@ -130,10 +132,9 @@ export function Home() {
 												isToggling={togglingPrivacy === p.id}
 											/>
 										)}
-										<a
+										<Link
 											href={`/posts/${p.id}`}
 											className="post-link group"
-											onContextMenu={(e) => handleRightClick(e, p.id)}
 											style={{ flex: 1 }}
 										>
 											<span className="post-title group-underline">
@@ -144,7 +145,7 @@ export function Home() {
 													— {formatDate(p.updatedAt)}
 												</span>
 											)}
-										</a>
+										</Link>
 									</div>
 								</li>
 							))}
@@ -153,9 +154,9 @@ export function Home() {
 
 				{/* Archive link */}
 				<div style={{ marginTop: 24, fontSize: 14 }}>
-					<a className="header-button" href="/archive">
+					<Link className="header-button" href="/archive">
 						View the full archive →
-					</a>
+					</Link>
 				</div>
 			</div>
 
@@ -182,4 +183,4 @@ export function Home() {
 			)}
 		</div>
 	);
-}
+});

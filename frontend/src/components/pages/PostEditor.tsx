@@ -10,6 +10,8 @@ import { useSettings } from "../../hooks/useSettings";
 import { Header } from "../layout/Header";
 import { AIEnabledEditor } from "../common/AIEnabledEditor";
 import { type Note } from "../../types";
+import { navigateTo } from "../../lib/router";
+import { Link } from "../common/Link";
 
 interface PostEditorProps {
 	id: string;
@@ -84,7 +86,7 @@ export function PostEditor({ id }: PostEditorProps) {
 			});
 			if (!res.ok) throw new Error(`Failed to create note: ${res.status}`);
 			const note = await res.json();
-			window.location.assign(`/posts/${note.id}`);
+			navigateTo(`/posts/${note.id}`);
 		} catch (e) {
 			console.error("PostEditor: Failed to create new post", e);
 			alert("Failed to create a new post");
@@ -182,7 +184,7 @@ export function PostEditor({ id }: PostEditorProps) {
 				siteTitle={settings.siteTitle}
 				isAuthenticated={isAuthenticated}
 				onLogout={logout}
-				onSettings={() => window.location.assign("/settings")}
+				onSettings={() => navigateTo("/settings")}
 				onNewPost={handleNewPost}
 				creating={creating}
 			/>
@@ -265,7 +267,7 @@ export function PostEditor({ id }: PostEditorProps) {
 							}}>
 								{(backlinks || []).map((post) => (
 									<li key={post.id}>
-										<a
+										<Link
 											href={`/posts/${post.id}`}
 											style={{
 												color: "#111",
@@ -297,7 +299,7 @@ export function PostEditor({ id }: PostEditorProps) {
 													})}
 												</span>
 											)}
-										</a>
+										</Link>
 									</li>
 								))}
 							</ul>

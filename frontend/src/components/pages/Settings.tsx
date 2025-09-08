@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { Header } from "../layout/Header";
+import { navigateTo } from "../../lib/router";
 
 export function Settings() {
 	const { isAuthenticated, token, logout } = useAuth();
@@ -214,7 +215,7 @@ export function Settings() {
 				);
 			}
 
-			window.location.assign("/");
+			navigateTo("/");
 		} catch (e: any) {
 			console.error("Settings: Failed to save settings", e);
 			// Show a more user-friendly message since the data is actually being saved
@@ -247,7 +248,7 @@ export function Settings() {
 						style={{ maxWidth: 800, margin: "0 auto", padding: "32px 24px" }}
 					>
 						<p>Access denied. Please log in to access settings.</p>
-						<button onClick={() => window.location.assign("/admin")}>
+						<button onClick={() => navigateTo("/admin")}>
 							Go to Login
 						</button>
 					</main>

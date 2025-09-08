@@ -8,14 +8,15 @@ import { Settings } from "./pages/Settings";
 import { PostEditor } from "./pages/PostEditor";
 import { usePrefetch } from "../hooks/usePrefetch";
 import { useAuth } from "../hooks/useAuth";
+import { useRouter } from "../hooks/useRouter";
 
 export function AppContent() {
 	const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
 	const [setupLoading, setSetupLoading] = useState(true);
 	const { token } = useAuth();
 	const { prefetchPosts, prefetchSettings } = usePrefetch(token);
+	const { path } = useRouter();
 
-	const path = typeof window !== "undefined" ? window.location.pathname : "/";
 	const match = useMemo(() => {
 		const m = path.match(/^\/posts\/([A-Za-z0-9_-]+)$/);
 		return m?.[1];

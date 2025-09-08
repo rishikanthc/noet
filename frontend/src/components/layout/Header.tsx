@@ -1,4 +1,6 @@
 import { memo } from 'react';
+import { Link } from "../common/Link";
+import { useRouter } from "../../hooks/useRouter";
 
 interface HeaderProps {
 	siteTitle: string;
@@ -19,34 +21,34 @@ export const Header = memo<HeaderProps>(function Header({
 	creating,
 	aboutEnabled,
 }) {
-	const path = typeof window !== "undefined" ? window.location.pathname : "/";
+	const { path } = useRouter();
 	
 	return (
 		<header className="site-header">
 			<div className="site-header-content">
-				<a href="/" className={`site-title ${!siteTitle ? "empty" : ""}`}>
+				<Link href="/" className={`site-title ${!siteTitle ? "empty" : ""}`}>
 					{siteTitle || "Untitled Site"}
-				</a>
+				</Link>
 				<div className="header-actions" role="navigation" aria-label="Primary">
-					<a
+					<Link
 						className={`header-button ${path === "/" ? "active" : ""}`}
 						href="/"
 					>
 						Home
-					</a>
-					<a
+					</Link>
+					<Link
 						className={`header-button ${path === "/archive" ? "active" : ""}`}
 						href="/archive"
 					>
 						Archive
-					</a>
+					</Link>
 					{aboutEnabled && (
-						<a
+						<Link
 							className={`header-button ${path === "/about" ? "active" : ""}`}
 							href="/about"
 						>
 							About Me
-						</a>
+						</Link>
 					)}
 					<a className="header-button" href="/rss.xml">
 						RSS
