@@ -4,6 +4,7 @@ import { AIEditButton } from './AIEditButton';
 import { AIEditDialog } from './AIEditDialog';
 import { useAIEdit } from '../../hooks/useAIEdit';
 import { useSettings } from '../../hooks/useSettings';
+import { parseMarkdownToHTML } from '../../utils/markdownParser';
 
 interface AIEnabledEditorProps {
 	content: string;
@@ -113,39 +114,84 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 		}, [selection]);
 
 		const handleApplyEdit = useCallback((editedText: string) => {
-			if (!savedSelection?.range) {
+			if (!savedSelection || !editorRef.current?.editor) {
+				console.warn('No saved selection or editor available');
 				return;
 			}
 
-			// Use the saved range to replace the text
-			const range = savedSelection.range;
-			const sel = window.getSelection();
+			const editor = editorRef.current.editor;
 			
-			if (sel && range) {
-				// Restore the selection
-				sel.removeAllRanges();
-				sel.addRange(range);
+			// Simple approach: find the original text in the editor and replace it
+			try {
+				const currentContent = editor.getHTML();
+				const originalText = savedSelection.text;
 				
-				// Replace the selection with the new content
-				range.deleteContents();
+				console.log('Attempting to replace:', originalText);
+				console.log('With:', editedText);
 				
-				// Insert the new text (treat as plain text to avoid HTML injection issues)
-				const textNode = document.createTextNode(editedText);
-				range.insertNode(textNode);
+				// Parse markdown to HTML
+				const htmlContent = parseMarkdownToHTML(editedText);
+				console.log('Parsed HTML:', htmlContent);
 				
-				// Clear selection and state
-				sel.removeAllRanges();
-				setSelection(null);
-				setSavedSelection(null);
+				// Try to find and replace the text using editor's built-in search and replace
+				const { state } = editor;
+				const { doc } = state;
 				
-				// Trigger onChange event with updated content
-				if (props.onChange && editorRef.current) {
-					// Get the updated HTML content from the editor
-					const updatedContent = editorRef.current.getElement?.()?.innerHTML || '';
-					props.onChange(updatedContent);
+				// Search for the original text in the document
+				let foundPos = null;
+				doc.descendants((node, pos) => {
+					if (node.isText && node.text?.includes(originalText)) {
+						const textStart = node.text.indexOf(originalText);
+						foundPos = {
+							from: pos + textStart,
+							to: pos + textStart + originalText.length
+						};
+						return false; // Stop searching
+					}
+				});
+				
+				if (foundPos) {
+					console.log('Found text at position:', foundPos);
+					
+					// Replace the content
+					editor
+						.chain()
+						.focus()
+						.setTextSelection(foundPos)
+						.deleteSelection()
+						.insertContent(htmlContent)
+						.run();
+						
+					console.log('Content replaced successfully');
+				} else {
+					console.warn('Could not find original text in document, using fallback');
+					
+					// Fallback: just insert at current cursor position
+					editor
+						.chain()
+						.focus()
+						.insertContent(' ' + htmlContent + ' ')
+						.run();
+				}
+			} catch (error) {
+				console.error('Error in handleApplyEdit:', error);
+				
+				// Final fallback - just insert the content
+				try {
+					editor
+						.chain()
+						.focus()
+						.insertContent(editedText)
+						.run();
+				} catch (finalError) {
+					console.error('All approaches failed:', finalError);
 				}
 			}
-		}, [savedSelection, props.onChange]);
+			
+			// Clear selection and state
+			setSelection(null);
+			setSavedSelection(null);
+		}, [savedSelection]);
 
 		const handleDialogClose = useCallback(() => {
 			setDialogOpen(false);
