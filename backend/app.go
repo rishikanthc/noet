@@ -11,6 +11,7 @@ import (
     "errors"
     "fmt"
     "io"
+    "log/slog"
     "mime"
     "net/http"
     "os"
@@ -35,6 +36,7 @@ type App struct {
     DB        *sql.DB
     Mux       *http.ServeMux
     JWTSecret []byte
+    Logger    *slog.Logger
 
     // SSE
     clientsMu    sync.Mutex
@@ -95,13 +97,21 @@ func NewApp(dbPath string) (*App, error) {
         return nil, fmt.Errorf("failed to get JWT secret: %v", err)
     }
 
+    // Initialize logger with database-stored log level
+    logger, err := initLogger(db)
+    if err != nil {
+        return nil, fmt.Errorf("failed to initialize logger: %v", err)
+    }
+
     a := &App{
         DB:        db, 
         Mux:       http.NewServeMux(), 
         JWTSecret: jwtSecret,
+        Logger:    logger,
         clients:   make(map[int]chan string),
     }
     
+    a.Logger.Info("Application initialized successfully", "dbPath", dbPath)
     a.routes()
     return a, nil
 }
@@ -205,6 +215,74 @@ func getOrCreateJWTSecret(db *sql.DB) ([]byte, error) {
     
     // Decode existing secret
     return base64.StdEncoding.DecodeString(secretStr)
+}
+
+// initLogger initializes the logger with the log level from database
+func initLogger(db *sql.DB) (*slog.Logger, error) {
+    logLevel := getLogLevel(db)
+    
+    var level slog.Level
+    switch strings.ToUpper(logLevel) {
+    case "DEBUG":
+        level = slog.LevelDebug
+    case "INFO":
+        level = slog.LevelInfo
+    default:
+        level = slog.LevelInfo
+    }
+    
+    opts := &slog.HandlerOptions{
+        Level: level,
+    }
+    
+    handler := slog.NewTextHandler(os.Stdout, opts)
+    return slog.New(handler), nil
+}
+
+// getLogLevel retrieves the log level from database, defaults to INFO
+func getLogLevel(db *sql.DB) string {
+    var logLevel string
+    err := db.QueryRow(`SELECT value FROM settings WHERE key = 'log_level'`).Scan(&logLevel)
+    
+    if err == sql.ErrNoRows {
+        // Default to INFO level
+        logLevel = "INFO"
+        // Store default in database
+        db.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('log_level', ?, ?)`, 
+            logLevel, time.Now())
+    } else if err != nil {
+        // If there's an error, default to INFO
+        return "INFO"
+    }
+    
+    return logLevel
+}
+
+// updateLogLevel updates the log level in database and reinitializes logger
+func (a *App) updateLogLevel(newLevel string) error {
+    // Validate log level
+    newLevel = strings.ToUpper(newLevel)
+    if newLevel != "DEBUG" && newLevel != "INFO" {
+        return fmt.Errorf("invalid log level: %s. Must be DEBUG or INFO", newLevel)
+    }
+    
+    // Update in database
+    _, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('log_level', ?, ?)`,
+        newLevel, time.Now())
+    if err != nil {
+        return fmt.Errorf("failed to update log level in database: %v", err)
+    }
+    
+    // Reinitialize logger
+    logger, err := initLogger(a.DB)
+    if err != nil {
+        return fmt.Errorf("failed to reinitialize logger: %v", err)
+    }
+    
+    a.Logger = logger
+    a.Logger.Info("Log level updated", "level", newLevel)
+    
+    return nil
 }
 
 func (a *App) createRefreshToken(userID int64) (string, error) {
@@ -688,21 +766,28 @@ func (a *App) routes() {
         
         user, err := a.authenticateUser(payload.Username, payload.Password)
         if err != nil {
+            a.Logger.Info("Login attempt failed", "username", payload.Username, "error", err.Error())
             http.Error(w, "invalid credentials", http.StatusUnauthorized)
             return
         }
         
+        a.Logger.Info("User authenticated successfully", "username", user.Username, "userID", user.ID)
+        
         token, err := a.generateJWT(user)
         if err != nil {
+            a.Logger.Error("Failed to generate JWT token", "userID", user.ID, "error", err.Error())
             http.Error(w, "failed to generate token", http.StatusInternalServerError)
             return
         }
         
         refreshToken, err := a.createRefreshToken(user.ID)
         if err != nil {
+            a.Logger.Error("Failed to generate refresh token", "userID", user.ID, "error", err.Error())
             http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
             return
         }
+        
+        a.Logger.Info("Login successful", "username", user.Username, "userID", user.ID)
         
         w.Header().Set("Content-Type", "application/json")
         _ = json.NewEncoder(w).Encode(map[string]interface{}{
@@ -819,14 +904,17 @@ func (a *App) routes() {
         case http.MethodPost:
             // Protect post creation
             a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+                a.Logger.Debug("Creating new post")
                 now := time.Now()
                 res, err := a.DB.Exec(`INSERT INTO posts(title, content, created_at, updated_at, is_private) VALUES(NULL, '', ?, ?, ?)`, now, now, true)
                 if err != nil {
+                    a.Logger.Error("Failed to create post in database", "error", err.Error())
                     http.Error(w, "db error", http.StatusInternalServerError)
                     return
                 }
                 id, _ := res.LastInsertId()
                 p := Post{ID: id, Title: nil, Content: "", CreatedAt: now, UpdatedAt: now, IsPrivate: true}
+                a.Logger.Info("Post created successfully", "postID", id, "isPrivate", p.IsPrivate)
                 w.Header().Set("Content-Type", "application/json")
                 w.WriteHeader(http.StatusCreated)
                 _ = json.NewEncoder(w).Encode(p)
@@ -835,11 +923,14 @@ func (a *App) routes() {
             return
         case http.MethodGet:
             isAuth := a.isAuthenticated(r)
+            a.Logger.Debug("Fetching posts list", "authenticated", isAuth)
             posts, err := a.getPostsWithPrivacy(isAuth)
             if err != nil {
+                a.Logger.Error("Failed to fetch posts from database", "error", err.Error())
                 http.Error(w, "db error", http.StatusInternalServerError)
                 return
             }
+            a.Logger.Debug("Posts fetched successfully", "count", len(posts), "authenticated", isAuth)
             w.Header().Set("Content-Type", "application/json")
             _ = json.NewEncoder(w).Encode(posts)
             return
@@ -907,9 +998,11 @@ func (a *App) routes() {
                 
                 // Toggle privacy state
                 newPrivate := !p.IsPrivate
+                a.Logger.Info("Toggling post privacy", "postID", idStr, "from", p.IsPrivate, "to", newPrivate)
                 
                 _, err = a.DB.Exec(`UPDATE posts SET is_private = ? WHERE id = ?`, newPrivate, idStr)
                 if err != nil {
+                    a.Logger.Error("Failed to update post privacy in database", "postID", idStr, "error", err.Error())
                     http.Error(w, "db error", http.StatusInternalServerError)
                     return
                 }
@@ -917,10 +1010,12 @@ func (a *App) routes() {
                 // Get updated post
                 updatedPost, err := a.getPost(idStr)
                 if err != nil {
+                    a.Logger.Error("Failed to fetch updated post after privacy toggle", "postID", idStr, "error", err.Error())
                     http.Error(w, "db error", http.StatusInternalServerError)
                     return
                 }
                 
+                a.Logger.Info("Post privacy toggled successfully", "postID", idStr, "isPrivate", updatedPost.IsPrivate)
                 w.Header().Set("Content-Type", "application/json")
                 _ = json.NewEncoder(w).Encode(updatedPost)
                 go a.broadcast("post-updated", updatedPost)
@@ -955,8 +1050,10 @@ func (a *App) routes() {
         case http.MethodPut:
             // Protect post updates
             a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+                a.Logger.Debug("Updating post", "postID", idStr)
                 var payload struct{ Content string `json:"content"` }
                 if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+                    a.Logger.Error("Invalid JSON in post update request", "postID", idStr, "error", err.Error())
                     http.Error(w, "invalid json", http.StatusBadRequest)
                     return
                 }
@@ -969,14 +1066,19 @@ func (a *App) routes() {
                 // update
                 _, err := a.DB.Exec(`UPDATE posts SET title = ?, content = ?, updated_at = ? WHERE id = ?`, titlePtr, payload.Content, now, idStr)
                 if err != nil {
+                    a.Logger.Error("Failed to update post in database", "postID", idStr, "error", err.Error())
                     http.Error(w, "db error", http.StatusInternalServerError)
                     return
                 }
                 
+                a.Logger.Info("Post updated successfully", "postID", idStr, "title", title)
+                
                 // Parse post ID and update bi-directional links
                 if postID, parseErr := strconv.ParseInt(idStr, 10, 64); parseErr == nil {
                     if linkErr := a.updatePostLinks(postID, payload.Content); linkErr != nil {
-                        // Silently ignore link update errors to not fail the request
+                        a.Logger.Debug("Failed to update post links", "postID", postID, "error", linkErr.Error())
+                    } else {
+                        a.Logger.Debug("Post links updated successfully", "postID", postID)
                     }
                 }
                 
@@ -1077,6 +1179,40 @@ func (a *App) routes() {
                 }
                 w.Header().Set("Content-Type", "application/json")
                 _ = json.NewEncoder(w).Encode(map[string]string{"key": payload.Key, "value": payload.Value})
+            })(w, r)
+            return
+        default:
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+    })
+
+    // Log level endpoint - special handling to reinitialize logger
+    mux.HandleFunc("/api/settings/log-level", func(w http.ResponseWriter, r *http.Request) {
+        switch r.Method {
+        case http.MethodGet:
+            logLevel := getLogLevel(a.DB)
+            w.Header().Set("Content-Type", "application/json")
+            _ = json.NewEncoder(w).Encode(map[string]string{"level": logLevel})
+            return
+        case http.MethodPut:
+            // Protect log level updates
+            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+                var payload struct {
+                    Level string `json:"level"`
+                }
+                if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+                    http.Error(w, "invalid json", http.StatusBadRequest)
+                    return
+                }
+                
+                if err := a.updateLogLevel(payload.Level); err != nil {
+                    http.Error(w, err.Error(), http.StatusBadRequest)
+                    return
+                }
+                
+                w.Header().Set("Content-Type", "application/json")
+                _ = json.NewEncoder(w).Encode(map[string]string{"level": strings.ToUpper(payload.Level)})
             })(w, r)
             return
         default:
@@ -1193,14 +1329,19 @@ func (a *App) routes() {
         ch := make(chan string, 16)
         id := a.addClient(ch)
         defer a.removeClient(id)
+        
+        a.Logger.Debug("SSE client connected", "clientID", id, "remoteAddr", r.RemoteAddr)
 
         // snapshot
         isAuth := a.isAuthenticated(r)
         posts, err := a.getPostsWithPrivacy(isAuth)
         if err == nil {
+            a.Logger.Debug("Sending SSE snapshot", "clientID", id, "postCount", len(posts), "authenticated", isAuth)
             b, _ := json.Marshal(posts)
             _, _ = w.Write([]byte(fmt.Sprintf("event: snapshot\ndata: %s\n\n", string(b))))
             flusher.Flush()
+        } else {
+            a.Logger.Error("Failed to fetch posts for SSE snapshot", "clientID", id, "error", err.Error())
         }
 
         ticker := time.NewTicker(30 * time.Second)
@@ -1218,6 +1359,7 @@ func (a *App) routes() {
                 _, _ = w.Write([]byte("event: ping\ndata: {}\n\n"))
                 flusher.Flush()
             case <-ctx.Done():
+                a.Logger.Debug("SSE client disconnected", "clientID", id)
                 return
             }
         }

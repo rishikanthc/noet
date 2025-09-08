@@ -2,6 +2,7 @@ package main
 
 import (
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 )
@@ -24,5 +25,7 @@ func main() {
 		log.Fatalf("failed to initialize app: %v", err)
 	}
 	addr := ":8081"
+	app.Logger.Info("Starting Noet server", "address", addr, "database", dbPath)
+	slog.Info("Server starting up", "address", addr)
 	log.Fatal(http.ListenAndServe(addr, app.Mux))
 }

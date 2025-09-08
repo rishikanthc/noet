@@ -10,6 +10,7 @@ export function Settings() {
 	const [aboutEnabled, setAboutEnabled] = useState<boolean>(false);
 	const [openaiApiKey, setOpenaiApiKey] = useState<string>("");
 	const [aiEnabled, setAiEnabled] = useState<boolean>(false);
+	const [logLevel, setLogLevel] = useState<string>("INFO");
 	const [uploading, setUploading] = useState(false);
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
@@ -27,6 +28,13 @@ export function Settings() {
 					setAboutEnabled(data.aboutEnabled === "true");
 					setOpenaiApiKey(data.openai_api_key || "");
 					setAiEnabled(data.ai_enabled === "true");
+				}
+				
+				// Load log level separately
+				const logRes = await fetch("/api/settings/log-level");
+				if (logRes.ok) {
+					const logData = await logRes.json();
+					setLogLevel(logData.level || "INFO");
 				}
 			} catch (e) {
 			} finally {
@@ -183,6 +191,23 @@ export function Settings() {
 						`Failed to save OpenAI API key: ${apiKeyRes.status} - ${errorText}`,
 					);
 				}
+			}
+
+			// Save log level
+			const logLevelRes = await fetch("/api/settings/log-level", {
+				method: "PUT",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify({ level: logLevel }),
+			});
+
+			if (!logLevelRes.ok) {
+				const errorText = await logLevelRes.text();
+				throw new Error(
+					`Failed to save log level: ${logLevelRes.status} - ${errorText}`,
+				);
 			}
 
 			window.location.assign("/");
@@ -453,6 +478,43 @@ export function Settings() {
 								</div>
 							</div>
 						)}
+					</div>
+
+					{/* Logging Settings Section */}
+					<div style={{ marginBottom: "24px", paddingTop: "24px", borderTop: "1px solid #e5e7eb" }}>
+						<h3 style={{ fontWeight: 500, fontSize: "16px", margin: "0 0 16px", color: "#111" }}>
+							Logging
+						</h3>
+						
+						<div style={{ marginBottom: "16px" }}>
+							<label
+								style={{ display: "block", margin: "12px 0 6px", color: "#444" }}
+							>
+								Log Level
+							</label>
+							<select
+								value={logLevel}
+								onChange={(e) => setLogLevel(e.target.value)}
+								style={{
+									width: "200px",
+									fontFamily: "Inter, system-ui, sans-serif",
+									fontSize: 14,
+									padding: 10,
+									boxSizing: "border-box",
+									border: "1px solid #d1d5db",
+									borderRadius: 6,
+									backgroundColor: "white",
+									cursor: "pointer"
+								}}
+								disabled={saving}
+							>
+								<option value="INFO">INFO</option>
+								<option value="DEBUG">DEBUG</option>
+							</select>
+							<div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>
+								Controls the verbosity of server-side logging. DEBUG shows more detailed information.
+							</div>
+						</div>
 					</div>
 
 					<div style={{ marginTop: 20, display: "flex", gap: 8 }}>
