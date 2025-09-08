@@ -8,6 +8,8 @@ export function Settings() {
 	const [siteTitle, setSiteTitle] = useState<string>("");
 	const [heroImage, setHeroImage] = useState<string>("");
 	const [aboutEnabled, setAboutEnabled] = useState<boolean>(false);
+	const [openaiApiKey, setOpenaiApiKey] = useState<string>("");
+	const [aiEnabled, setAiEnabled] = useState<boolean>(false);
 	const [uploading, setUploading] = useState(false);
 	const [loading, setLoading] = useState(true);
 	const [saving, setSaving] = useState(false);
@@ -23,6 +25,8 @@ export function Settings() {
 					setSiteTitle(data.siteTitle || "");
 					setHeroImage(data.heroImage || "");
 					setAboutEnabled(data.aboutEnabled === "true");
+					setOpenaiApiKey(data.openai_api_key || "");
+					setAiEnabled(data.ai_enabled === "true");
 				}
 			} catch (e) {
 				console.error("Failed to load settings:", e);
@@ -160,6 +164,46 @@ export function Settings() {
 
 			const aboutResult = await aboutRes.json();
 			console.log("About enabled saved successfully:", aboutResult);
+
+			// Save AI settings
+			console.log("Saving AI settings...");
+			const aiEnabledRes = await fetch("/api/settings", {
+				method: "PUT",
+				headers: {
+					"Content-Type": "application/json",
+					Authorization: `Bearer ${token}`,
+				},
+				body: JSON.stringify({ key: "ai_enabled", value: aiEnabled.toString() }),
+			});
+
+			if (!aiEnabledRes.ok) {
+				const errorText = await aiEnabledRes.text();
+				console.error("Failed to save AI enabled:", aiEnabledRes.status, errorText);
+				throw new Error(
+					`Failed to save AI enabled: ${aiEnabledRes.status} - ${errorText}`,
+				);
+			}
+
+			// Save OpenAI API key if provided
+			if (openaiApiKey.trim()) {
+				console.log("Saving OpenAI API key...");
+				const apiKeyRes = await fetch("/api/settings", {
+					method: "PUT",
+					headers: {
+						"Content-Type": "application/json",
+						Authorization: `Bearer ${token}`,
+					},
+					body: JSON.stringify({ key: "openai_api_key", value: openaiApiKey.trim() }),
+				});
+
+				if (!apiKeyRes.ok) {
+					const errorText = await apiKeyRes.text();
+					console.error("Failed to save OpenAI API key:", apiKeyRes.status, errorText);
+					throw new Error(
+						`Failed to save OpenAI API key: ${apiKeyRes.status} - ${errorText}`,
+					);
+				}
+			}
 
 			console.log("All settings saved successfully, redirecting...");
 			window.location.assign("/");
@@ -369,6 +413,68 @@ export function Settings() {
 						<div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>
 							When enabled, an "About Me" link will appear in the header navigation
 						</div>
+					</div>
+
+					{/* AI Settings Section */}
+					<div style={{ marginBottom: "24px", paddingTop: "24px", borderTop: "1px solid #e5e7eb" }}>
+						<h3 style={{ fontWeight: 500, fontSize: "16px", margin: "0 0 16px", color: "#111" }}>
+							AI Editing
+						</h3>
+						
+						<div style={{ marginBottom: "16px" }}>
+							<label
+								style={{ display: "block", margin: "12px 0 6px", color: "#444" }}
+							>
+								<input
+									type="checkbox"
+									checked={aiEnabled}
+									onChange={(e) => setAiEnabled(e.target.checked)}
+									disabled={saving}
+									style={{ marginRight: "8px" }}
+								/>
+								Enable AI text editing
+							</label>
+							<div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>
+								When enabled, you can use AI to improve selected text while editing
+							</div>
+						</div>
+
+						{aiEnabled && (
+							<div>
+								<label
+									style={{ display: "block", margin: "12px 0 6px", color: "#444" }}
+								>
+									OpenAI API Key
+								</label>
+								<input
+									type="password"
+									value={openaiApiKey}
+									onChange={(e) => setOpenaiApiKey(e.target.value)}
+									style={{
+										width: "100%",
+										fontFamily: "Inter, system-ui, sans-serif",
+										fontSize: 14,
+										padding: 10,
+										boxSizing: "border-box",
+										border: "1px solid #d1d5db",
+										borderRadius: 6,
+									}}
+									placeholder="sk-..."
+									disabled={saving}
+								/>
+								<div style={{ fontSize: "12px", color: "#666", marginTop: "4px" }}>
+									Your OpenAI API key is stored securely and never exposed to the frontend.{" "}
+									<a 
+										href="https://platform.openai.com/api-keys" 
+										target="_blank" 
+										rel="noopener noreferrer"
+										style={{ color: "#5046e6" }}
+									>
+										Get your API key
+									</a>
+								</div>
+							</div>
+						)}
 					</div>
 
 					<div style={{ marginTop: 20, display: "flex", gap: 8 }}>

@@ -1,0 +1,271 @@
+import React, { useState, useEffect, useRef, useCallback, forwardRef } from 'react';
+import { Editor, type EditorRef, type MentionItem } from 'textforge';
+import { AIEditButton } from './AIEditButton';
+import { AIEditDialog } from './AIEditDialog';
+import { useAIEdit } from '../../hooks/useAIEdit';
+import { useSettings } from '../../hooks/useSettings';
+
+interface AIEnabledEditorProps {
+	content: string;
+	editable: boolean;
+	onChange?: (html: string) => void;
+	onImageUpload?: (file: File) => Promise<string>;
+	onAutoSave?: (html: string) => Promise<void>;
+	mentions?: MentionItem[];
+}
+
+export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
+	function AIEnabledEditor(props, ref) {
+		const { settings } = useSettings();
+		const { editText } = useAIEdit();
+		
+		// Debug: log settings when they change
+		React.useEffect(() => {
+			console.log('🔍 AI Editor settings updated:', settings);
+		}, [settings]);
+		const [selection, setSelection] = useState<{
+			text: string;
+			x: number;
+			y: number;
+		} | null>(null);
+		const [dialogOpen, setDialogOpen] = useState(false);
+		const [savedSelection, setSavedSelection] = useState<{
+			text: string;
+			range: Range | null;
+		} | null>(null);
+		const editorRef = useRef<EditorRef>(null);
+		const selectionTimeoutRef = useRef<NodeJS.Timeout>();
+
+		// Forward ref to parent component
+		React.useImperativeHandle(ref, () => editorRef.current!, []);
+
+		const handleSelection = useCallback(() => {
+			// Clear any existing timeout
+			if (selectionTimeoutRef.current) {
+				clearTimeout(selectionTimeoutRef.current);
+			}
+
+			// Wait a bit for selection to stabilize
+			selectionTimeoutRef.current = setTimeout(() => {
+				const sel = window.getSelection();
+				console.log('🔍 Selection check:', { 
+					hasSelection: !!sel, 
+					rangeCount: sel?.rangeCount, 
+					isCollapsed: sel?.isCollapsed,
+					selectedText: sel?.toString()?.trim()
+				});
+				
+				if (sel && sel.rangeCount > 0 && !sel.isCollapsed) {
+					const selectedText = sel.toString().trim();
+					if (selectedText.length > 0) {
+						const range = sel.getRangeAt(0);
+						const rect = range.getBoundingClientRect();
+						
+						// Check if selection is within the editor
+						let editorEl = editorRef.current?.getElement?.();
+						
+						// Fallback: try to find editor by common TextForge classes
+						if (!editorEl) {
+							editorEl = document.querySelector('.ProseMirror') || 
+									  document.querySelector('[contenteditable="true"]') ||
+									  document.querySelector('.editor-wrap > div');
+						}
+						
+						console.log('🔍 Editor element:', { 
+							editorEl: !!editorEl, 
+							contains: editorEl ? editorEl.contains(range.commonAncestorContainer) : false
+						});
+						
+						if (editorEl && editorEl.contains(range.commonAncestorContainer)) {
+							const centerX = rect.left + (rect.width / 2);
+							const newSelection = {
+								text: selectedText,
+								x: centerX,
+								y: rect.top + window.scrollY,
+							};
+							console.log('🔍 Setting selection:', newSelection);
+							setSelection(newSelection);
+						}
+					}
+				} else {
+					setSelection(null);
+				}
+			}, 100);
+		}, []);
+
+		const handleMouseUp = useCallback(() => {
+			console.log('🔍 Mouse up detected. AI enabled:', settings.ai_enabled, 'Editable:', props.editable);
+			// Only show AI button if AI is enabled and we're authenticated
+			if (settings.ai_enabled && props.editable) {
+				handleSelection();
+			}
+		}, [settings.ai_enabled, props.editable, handleSelection]);
+
+		const handleKeyUp = useCallback((e: KeyboardEvent) => {
+			// Only show AI button if AI is enabled and we're authenticated
+			if (settings.ai_enabled && props.editable) {
+				// Don't trigger on certain keys that don't change selection meaningfully
+				if (['Shift', 'Control', 'Meta', 'Alt'].includes(e.key)) return;
+				console.log('🔍 Key up detected:', e.key);
+				handleSelection();
+			}
+		}, [settings.ai_enabled, props.editable, handleSelection]);
+
+		const handleAIEdit = useCallback(() => {
+			if (selection) {
+				// Save the current selection and range before opening dialog
+				const sel = window.getSelection();
+				let range: Range | null = null;
+				
+				if (sel && sel.rangeCount > 0) {
+					range = sel.getRangeAt(0).cloneRange(); // Clone the range to preserve it
+				}
+				
+				setSavedSelection({
+					text: selection.text,
+					range: range
+				});
+				
+				console.log('🔍 Saved selection before dialog:', { text: selection.text, range: !!range });
+				setDialogOpen(true);
+			}
+		}, [selection]);
+
+		const handleApplyEdit = useCallback((editedText: string) => {
+			if (!savedSelection?.range) {
+				console.log('🔍 No saved selection to apply edit to');
+				return;
+			}
+
+			console.log('🔍 Applying edit with saved selection:', savedSelection.text);
+
+			// Use the saved range to replace the text
+			const range = savedSelection.range;
+			const sel = window.getSelection();
+			
+			if (sel && range) {
+				// Restore the selection
+				sel.removeAllRanges();
+				sel.addRange(range);
+				
+				// Replace the selection with the new content
+				range.deleteContents();
+				
+				// Insert the new text (treat as plain text to avoid HTML injection issues)
+				const textNode = document.createTextNode(editedText);
+				range.insertNode(textNode);
+				
+				// Clear selection and state
+				sel.removeAllRanges();
+				setSelection(null);
+				setSavedSelection(null);
+				
+				// Trigger onChange event with updated content
+				if (props.onChange && editorRef.current) {
+					// Get the updated HTML content from the editor
+					const updatedContent = editorRef.current.getElement?.()?.innerHTML || '';
+					props.onChange(updatedContent);
+				}
+			}
+		}, [savedSelection, props.onChange]);
+
+		const handleDialogClose = useCallback(() => {
+			setDialogOpen(false);
+			setSavedSelection(null); // Clear saved selection when dialog closes
+		}, []);
+
+		const handleEditText = useCallback(async (userPrompt: string) => {
+			if (!savedSelection) throw new Error('No text selected');
+			console.log('🔍 Editing text with saved selection:', savedSelection.text);
+			return await editText(savedSelection.text, userPrompt);
+		}, [savedSelection, editText]);
+
+		useEffect(() => {
+			console.log('🔍 Setting up AI editing event listeners');
+			// Add global event listeners for text selection
+			document.addEventListener('mouseup', handleMouseUp);
+			document.addEventListener('keyup', handleKeyUp);
+			
+			// Also try to attach directly to the editor element
+			const attachToEditor = () => {
+				const editorEl = editorRef.current?.getElement?.();
+				if (editorEl) {
+					console.log('🔍 Found editor element, attaching events');
+					editorEl.addEventListener('mouseup', handleMouseUp);
+					editorEl.addEventListener('keyup', handleKeyUp);
+				} else {
+					// Retry after a short delay
+					setTimeout(attachToEditor, 500);
+				}
+			};
+			attachToEditor();
+			
+			// Clear selection when clicking outside
+			const handleClickOutside = (e: MouseEvent) => {
+				const target = e.target as Element;
+				const editorEl = editorRef.current?.getElement?.();
+				if (editorEl && !editorEl.contains(target)) {
+					setSelection(null);
+				}
+			};
+			document.addEventListener('mousedown', handleClickOutside);
+
+			return () => {
+				document.removeEventListener('mouseup', handleMouseUp);
+				document.removeEventListener('keyup', handleKeyUp);
+				document.removeEventListener('mousedown', handleClickOutside);
+				
+				// Also remove from editor element if it exists
+				const editorEl = editorRef.current?.getElement?.();
+				if (editorEl) {
+					editorEl.removeEventListener('mouseup', handleMouseUp);
+					editorEl.removeEventListener('keyup', handleKeyUp);
+				}
+				
+				if (selectionTimeoutRef.current) {
+					clearTimeout(selectionTimeoutRef.current);
+				}
+			};
+		}, [handleMouseUp, handleKeyUp]);
+
+		// Hide AI button when dialog is open or AI is disabled
+		const showAIButton = selection && !dialogOpen && settings.ai_enabled && props.editable;
+		
+		// Debug: log button visibility
+		React.useEffect(() => {
+			console.log('🔍 AI Button visibility:', { 
+				selection: !!selection, 
+				dialogOpen, 
+				aiEnabled: settings.ai_enabled, 
+				editable: props.editable, 
+				showAIButton 
+			});
+		}, [selection, dialogOpen, settings.ai_enabled, props.editable, showAIButton]);
+
+		return (
+			<>
+				<Editor
+					ref={editorRef}
+					{...props}
+				/>
+				
+				{showAIButton && (
+					<AIEditButton
+						x={selection.x}
+						y={selection.y}
+						onEdit={handleAIEdit}
+						visible={true}
+					/>
+				)}
+
+				<AIEditDialog
+					isOpen={dialogOpen}
+					selectedText={savedSelection?.text || ''}
+					onClose={handleDialogClose}
+					onApply={handleApplyEdit}
+					onEdit={handleEditText}
+				/>
+			</>
+		);
+	}
+);

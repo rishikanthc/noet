@@ -3,10 +3,11 @@ import {
 	useState,
 	useRef,
 } from "react";
-import { Editor, type EditorRef, type MentionItem } from "textforge";
+import { type EditorRef, type MentionItem } from "textforge";
 import { useAuth } from "../../hooks/useAuth";
 import { useSettings } from "../../hooks/useSettings";
 import { Header } from "../layout/Header";
+import { AIEnabledEditor } from "../common/AIEnabledEditor";
 import { type Note } from "../../types";
 
 export function AboutMe() {
@@ -151,7 +152,7 @@ export function AboutMe() {
 			<div className="app-container editor-page">
 				<main>
 					<div className="editor-wrap">
-						<Editor
+						<AIEnabledEditor
 							ref={editorRef}
 							content={content}
 							editable={isAuthenticated}

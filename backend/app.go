@@ -1,6 +1,7 @@
 package main
 
 import (
+    "bytes"
     "crypto/rand"
     "crypto/sha256"
     "database/sql"
@@ -1293,6 +1294,62 @@ func (a *App) routes() {
         }
     })
 
+    // AI editing endpoint
+    mux.HandleFunc("/api/ai/edit", func(w http.ResponseWriter, r *http.Request) {
+        if r.Method != http.MethodPost {
+            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+            return
+        }
+
+        // Protect AI endpoint
+        a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+            // Parse request
+            var req struct {
+                SelectedText string `json:"selectedText"`
+                UserPrompt   string `json:"userPrompt"`
+            }
+            
+            if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+                http.Error(w, "invalid request", http.StatusBadRequest)
+                return
+            }
+            
+            if req.SelectedText == "" || req.UserPrompt == "" {
+                http.Error(w, "selectedText and userPrompt are required", http.StatusBadRequest)
+                return
+            }
+            
+            // Get OpenAI API key from settings
+            var apiKey string
+            err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, "openai_api_key").Scan(&apiKey)
+            if err != nil {
+                if errors.Is(err, sql.ErrNoRows) {
+                    http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
+                    return
+                }
+                http.Error(w, "database error", http.StatusInternalServerError)
+                return
+            }
+            
+            if apiKey == "" {
+                http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
+                return
+            }
+            
+            // Call OpenAI API
+            response, err := a.callOpenAI(apiKey, req.SelectedText, req.UserPrompt)
+            if err != nil {
+                http.Error(w, fmt.Sprintf("AI processing failed: %v", err), http.StatusInternalServerError)
+                return
+            }
+            
+            w.Header().Set("Content-Type", "application/json")
+            json.NewEncoder(w).Encode(map[string]string{
+                "editedText": response,
+            })
+        })(w, r)
+    })
+
     // Static files
     mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
         p := r.URL.Path
@@ -1416,4 +1473,81 @@ func (a *App) getPostsWithPrivacy(isAuthenticated bool) ([]Post, error) {
         posts = append(posts, p)
     }
     return posts, nil
+}
+
+// callOpenAI makes a request to OpenAI's API for text editing
+func (a *App) callOpenAI(apiKey, selectedText, userPrompt string) (string, error) {
+    // System prompt designed to return clean markdown without code fences
+    systemPrompt := `You are a professional text editor. Your task is to improve the provided text according to the user's instructions.
+
+IMPORTANT RULES:
+- Return ONLY the improved text in markdown format
+- DO NOT include any explanations, commentary, or meta-text
+- DO NOT wrap the response in code fences or backticks
+- DO NOT add "Here is the improved text:" or similar prefixes
+- Preserve the original meaning while applying the requested changes
+- Ensure the output is clean, well-formatted markdown`
+
+    // Prepare the request payload for OpenAI API
+    payload := map[string]interface{}{
+        "model": "gpt-4",
+        "messages": []map[string]string{
+            {
+                "role":    "system",
+                "content": systemPrompt,
+            },
+            {
+                "role":    "user", 
+                "content": fmt.Sprintf("Original text:\n%s\n\nUser instruction: %s", selectedText, userPrompt),
+            },
+        },
+        "max_tokens":    2000,
+        "temperature":   0.3,
+    }
+    
+    payloadBytes, err := json.Marshal(payload)
+    if err != nil {
+        return "", fmt.Errorf("failed to marshal request: %w", err)
+    }
+    
+    // Create HTTP request
+    req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(payloadBytes))
+    if err != nil {
+        return "", fmt.Errorf("failed to create request: %w", err)
+    }
+    
+    req.Header.Set("Content-Type", "application/json")
+    req.Header.Set("Authorization", "Bearer "+apiKey)
+    
+    // Make the request
+    client := &http.Client{Timeout: 30 * time.Second}
+    resp, err := client.Do(req)
+    if err != nil {
+        return "", fmt.Errorf("request failed: %w", err)
+    }
+    defer resp.Body.Close()
+    
+    if resp.StatusCode != http.StatusOK {
+        body, _ := io.ReadAll(resp.Body)
+        return "", fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
+    }
+    
+    // Parse response
+    var response struct {
+        Choices []struct {
+            Message struct {
+                Content string `json:"content"`
+            } `json:"message"`
+        } `json:"choices"`
+    }
+    
+    if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+        return "", fmt.Errorf("failed to decode response: %w", err)
+    }
+    
+    if len(response.Choices) == 0 {
+        return "", fmt.Errorf("no response from OpenAI")
+    }
+    
+    return strings.TrimSpace(response.Choices[0].Message.Content), nil
 }
