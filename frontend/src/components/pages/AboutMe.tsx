@@ -125,7 +125,7 @@ export function AboutMe() {
 		);
 	}
 
-	if (loading || !mentionsLoaded)
+	if ((loading && !content) || !mentionsLoaded)
 		return (
 			<div className="app-container">
 				<p>Loading…</p>

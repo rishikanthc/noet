@@ -110,7 +110,7 @@ export const Home = memo(function Home() {
 					</p>
 				</div>
 				<h1>Latest</h1>
-				{loading && <p>Loading…</p>}
+				{loading && latestPosts.length === 0 && <p>Loading…</p>}
 				{error && <p>{error}</p>}
 				{!loading &&
 					!error &&

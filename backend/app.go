@@ -1291,22 +1291,13 @@ func (a *App) routes() {
             // Get all settings or specific setting by key query param
             key := r.URL.Query().Get("key")
             if key != "" {
-                // Check cache first for specific setting
-                cacheKey := fmt.Sprintf("setting_%s", key)
-                if cached, found := a.cacheGet(cacheKey); found {
-                    w.Header().Set("Content-Type", "application/json")
-                    w.Header().Set("Cache-Control", "public, max-age=300")
-                    w.Header().Set("X-Cache", "HIT")
-                    _ = json.NewEncoder(w).Encode(map[string]string{"value": cached.(string)})
-                    return
-                }
-                
                 // Get specific setting
                 var value string
                 err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
                 if err != nil {
                     if errors.Is(err, sql.ErrNoRows) {
                         w.Header().Set("Content-Type", "application/json")
+                        w.Header().Set("Cache-Control", "no-cache")
                         _ = json.NewEncoder(w).Encode(map[string]string{"value": ""})
                         return
                     }
@@ -1314,22 +1305,9 @@ func (a *App) routes() {
                     return
                 }
                 
-                // Cache the setting for 5 minutes
-                a.cacheSet(cacheKey, value, 5*time.Minute)
-                
                 w.Header().Set("Content-Type", "application/json")
-                w.Header().Set("Cache-Control", "public, max-age=300")
-                w.Header().Set("X-Cache", "MISS")
+                w.Header().Set("Cache-Control", "no-cache")
                 _ = json.NewEncoder(w).Encode(map[string]string{"value": value})
-                return
-            }
-            
-            // Check cache for all settings
-            if cached, found := a.cacheGet("settings_all"); found {
-                w.Header().Set("Content-Type", "application/json")
-                w.Header().Set("Cache-Control", "public, max-age=300")
-                w.Header().Set("X-Cache", "HIT")
-                _ = json.NewEncoder(w).Encode(cached)
                 return
             }
             
@@ -1350,12 +1328,8 @@ func (a *App) routes() {
                 settings[k] = v
             }
             
-            // Cache all settings for 5 minutes
-            a.cacheSet("settings_all", settings, 5*time.Minute)
-            
             w.Header().Set("Content-Type", "application/json")
-            w.Header().Set("Cache-Control", "public, max-age=300")
-            w.Header().Set("X-Cache", "MISS")
+            w.Header().Set("Cache-Control", "no-cache")
             _ = json.NewEncoder(w).Encode(settings)
             return
         case http.MethodPut:

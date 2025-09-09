@@ -167,7 +167,7 @@ export function PostEditor({ id }: PostEditorProps) {
 		};
 	}, [id, token]);
 
-	if (loading || !mentionsLoaded)
+	if ((loading && !content) || !mentionsLoaded)
 		return (
 			<div className="app-container">
 				<p>Loading…</p>

@@ -95,7 +95,7 @@ export function Archive() {
 					</div>
 				)}
 
-				{loading && <p>Loading…</p>}
+				{loading && posts.length === 0 && <p>Loading…</p>}
 				{error && <p>{error}</p>}
 				{!loading &&
 					!error &&
