@@ -155,6 +155,8 @@ export function useUpdatePost() {
     mutationFn: ({ id, content, token }: { id: string; content: string; token: string }) =>
       updatePost(id, content, token),
     onSuccess: (updatedPost) => {
+      console.log("useUpdatePost onSuccess: Updating caches for post", updatedPost);
+      
       // Update the post in cache
       queryClient.setQueryData(postsQueryKeys.detail(updatedPost.id), updatedPost);
       
@@ -162,6 +164,7 @@ export function useUpdatePost() {
       queryClient.setQueryData(
         postsQueryKeys.list(true),
         (oldData: Note[] | undefined) => {
+          console.log("useUpdatePost: Updating authenticated posts list", { oldData: oldData?.length, updatedPost: updatedPost.title });
           if (!oldData) return [updatedPost];
           return oldData.map((post) =>
             post.id === updatedPost.id ? updatedPost : post
@@ -174,6 +177,7 @@ export function useUpdatePost() {
         queryClient.setQueryData(
           postsQueryKeys.list(false),
           (oldData: Note[] | undefined) => {
+            console.log("useUpdatePost: Updating public posts list", { oldData: oldData?.length, updatedPost: updatedPost.title });
             if (!oldData) return [updatedPost];
             return oldData.map((post) =>
               post.id === updatedPost.id ? updatedPost : post
@@ -183,6 +187,7 @@ export function useUpdatePost() {
       }
       
       // Invalidate posts lists to trigger background refetch
+      console.log("useUpdatePost: Invalidating posts lists");
       queryClient.invalidateQueries({ queryKey: postsQueryKeys.lists() });
     },
   });

@@ -7,6 +7,7 @@ import {
 import { type EditorRef, type MentionItem } from "textforge";
 import { useAuth } from "../../hooks/useAuth";
 import { useSettings } from "../../hooks/useSettings";
+import { useUpdatePost } from "../../hooks/usePostsQuery";
 import { Header } from "../layout/Header";
 import { AIEnabledEditor } from "../common/AIEnabledEditor";
 import { type Note } from "../../types";
@@ -20,6 +21,7 @@ interface PostEditorProps {
 export function PostEditor({ id }: PostEditorProps) {
 	const { isAuthenticated, token, logout } = useAuth();
 	const { settings } = useSettings();
+	const updatePostMutation = useUpdatePost();
 	const [content, setContent] = useState<string>("");
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
@@ -209,21 +211,15 @@ export function PostEditor({ id }: PostEditorProps) {
 							}
 							onImageUpload={isAuthenticated ? handleImageUpload : undefined}
 							onAutoSave={
-								isAuthenticated
+								isAuthenticated && token
 									? async (html) => {
 											try {
-												const res = await fetch(`/api/posts/${id}`, {
-													method: "PUT",
-													headers: {
-														"Content-Type": "application/json",
-														...(token
-															? { Authorization: `Bearer ${token}` }
-															: {}),
-													},
-													body: JSON.stringify({ content: html }),
+												const updatedPost = await updatePostMutation.mutateAsync({
+													id,
+													content: html,
+													token
 												});
-												if (!res.ok)
-													throw new Error(`Failed to save note: ${res.status}`);
+												console.log("PostEditor: Auto-save successful, updated post:", updatedPost);
 												// Only clear dirty if content hasn't changed since this save started
 												if (latestContentRef.current === html) {
 													setDirty(false);
