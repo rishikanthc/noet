@@ -219,7 +219,6 @@ export function PostEditor({ id }: PostEditorProps) {
 													content: html,
 													token
 												});
-												console.log("PostEditor: Auto-save successful, updated post:", updatedPost);
 												// Only clear dirty if content hasn't changed since this save started
 												if (latestContentRef.current === html) {
 													setDirty(false);
