@@ -19,6 +19,7 @@ export function Archive() {
 	const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
 	const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>(null);
 	const [togglingPrivacy, setTogglingPrivacy] = useState<number | null>(null);
+	const [creating, setCreating] = useState(false);
 
 	const handlePrivacyToggle = useCallback(async (postId: number) => {
 		if (!isAuthenticated || !token) return;
@@ -60,6 +61,25 @@ export function Archive() {
 		setConfirmDialog(null);
 	}, [confirmDialog, handleDeletePost]);
 
+	const handleNewPost = async () => {
+		if (creating || !isAuthenticated) return;
+		setCreating(true);
+		try {
+			const res = await fetch("/api/posts", {
+				method: "POST",
+				headers: token ? { Authorization: `Bearer ${token}` } : {},
+			});
+			if (!res.ok) throw new Error(`Failed to create note: ${res.status}`);
+			const note = await res.json();
+			navigateTo(`/posts/${note.id}`);
+		} catch (e) {
+			console.error("Archive: Failed to create new post", e);
+			alert("Failed to create a new post");
+		} finally {
+			setCreating(false);
+		}
+	};
+
 	// Filter posts based on search query
 	const filteredPosts = useMemo(() => {
 		if (!searchQuery.trim()) return posts;
@@ -78,6 +98,8 @@ export function Archive() {
 				isAuthenticated={isAuthenticated}
 				onLogout={logout}
 				onSettings={() => navigateTo("/settings")}
+				onNewPost={handleNewPost}
+				creating={creating}
 				aboutEnabled={settings.aboutEnabled}
 			/>
 			<div className="home-content">
