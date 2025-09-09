@@ -29,8 +29,10 @@ export function PostEditor({ id }: PostEditorProps) {
 	const [postMentions, setPostMentions] = useState<MentionItem[]>([]);
 	const [backlinks, setBacklinks] = useState<Note[]>([]);
 	const [backlinksLoading, setBacklinksLoading] = useState(false);
+	const [isInitialLoad, setIsInitialLoad] = useState(true);
 	const editorRef = useRef<EditorRef>(null);
 	const latestContentRef = useRef<string>("");
+	const initialContentRef = useRef<string>("");
 
 	const loadBacklinks = useCallback(async () => {
 		setBacklinksLoading(true);
@@ -97,6 +99,9 @@ export function PostEditor({ id }: PostEditorProps) {
 
 	useEffect(() => {
 		let cancelled = false;
+		
+		// Reset initial load state when switching posts
+		setIsInitialLoad(true);
 
 		// Load post content immediately (highest priority)
 		const loadPostContent = async () => {
@@ -107,9 +112,13 @@ export function PostEditor({ id }: PostEditorProps) {
 				if (response.ok) {
 					const note = await response.json();
 					if (!cancelled) {
-						setContent(note.content || "");
-						latestContentRef.current = note.content || "";
+						const initialContent = note.content || "";
+						setContent(initialContent);
+						latestContentRef.current = initialContent;
+						initialContentRef.current = initialContent;
 						setDirty(false);
+						// Mark initial load as complete after content is set and editor is initialized
+						setTimeout(() => setIsInitialLoad(false), 50);
 					}
 				} else {
 					throw new Error(`Failed to load note: ${response.status}`);
@@ -189,7 +198,10 @@ export function PostEditor({ id }: PostEditorProps) {
 									? (html) => {
 											setContent(html);
 											latestContentRef.current = html;
-											setDirty(true);
+											// Only mark as dirty if this isn't the initial content load
+											if (!isInitialLoad) {
+												setDirty(true);
+											}
 										}
 									: undefined
 							}
@@ -197,6 +209,16 @@ export function PostEditor({ id }: PostEditorProps) {
 							onAutoSave={
 								isAuthenticated && token
 									? async (html) => {
+											// Don't auto-save during initial content load
+											if (isInitialLoad) {
+												return;
+											}
+											
+											// Don't save if content hasn't actually changed from initial
+											if (html === initialContentRef.current) {
+												return;
+											}
+											
 											try {
 												const updatedPost = await updatePostMutation.mutateAsync({
 													id,
