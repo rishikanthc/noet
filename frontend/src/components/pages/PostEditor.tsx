@@ -23,12 +23,10 @@ export function PostEditor({ id }: PostEditorProps) {
 	const { settings } = useSettings();
 	const updatePostMutation = useUpdatePost();
 	const [content, setContent] = useState<string>("");
-	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
 	const [dirty, setDirty] = useState(false);
 	const [creating, setCreating] = useState(false);
 	const [postMentions, setPostMentions] = useState<MentionItem[]>([]);
-	const [mentionsLoaded, setMentionsLoaded] = useState(false);
 	const [backlinks, setBacklinks] = useState<Note[]>([]);
 	const [backlinksLoading, setBacklinksLoading] = useState(false);
 	const editorRef = useRef<EditorRef>(null);
@@ -99,36 +97,37 @@ export function PostEditor({ id }: PostEditorProps) {
 
 	useEffect(() => {
 		let cancelled = false;
-		const loadAllData = async () => {
-			try {
-				// Load post content, post mentions, and backlinks in parallel
-				const [postRes, postsRes, backlinksRes] = await Promise.all([
-					fetch(`/api/posts/${id}`, {
-						headers: token ? { Authorization: `Bearer ${token}` } : {}
-					}),
-					fetch("/api/posts", {
-						headers: token ? { Authorization: `Bearer ${token}` } : {}
-					}),
-					fetch(`/api/posts/${id}/backlinks`, {
-						headers: token ? { Authorization: `Bearer ${token}` } : {}
-					})
-				]);
 
-				// Handle post content
-				if (postRes.ok) {
-					const note = await postRes.json();
+		// Load post content immediately (highest priority)
+		const loadPostContent = async () => {
+			try {
+				const response = await fetch(`/api/posts/${id}`, {
+					headers: token ? { Authorization: `Bearer ${token}` } : {}
+				});
+				if (response.ok) {
+					const note = await response.json();
 					if (!cancelled) {
 						setContent(note.content || "");
 						latestContentRef.current = note.content || "";
 						setDirty(false);
 					}
 				} else {
-					throw new Error(`Failed to load note: ${postRes.status}`);
+					throw new Error(`Failed to load note: ${response.status}`);
 				}
+			} catch (e: any) {
+				console.error("PostEditor: Failed to load post content", e);
+				if (!cancelled) setError(e?.message || "Failed to load note");
+			}
+		};
 
-				// Handle post mentions
-				if (postsRes.ok) {
-					const posts: Note[] = await postsRes.json();
+		// Load post mentions in parallel (for editor functionality)
+		const loadPostMentions = async () => {
+			try {
+				const response = await fetch("/api/posts", {
+					headers: token ? { Authorization: `Bearer ${token}` } : {}
+				});
+				if (response.ok) {
+					const posts: Note[] = await response.json();
 					const mentions: MentionItem[] = posts
 						.filter(post => post.id.toString() !== id)
 						.map(post => ({
@@ -140,39 +139,24 @@ export function PostEditor({ id }: PostEditorProps) {
 				} else {
 					if (!cancelled) setPostMentions([]);
 				}
-
-				// Handle backlinks
-				if (backlinksRes.ok) {
-					const backlinksData: Note[] = await backlinksRes.json();
-					if (!cancelled) setBacklinks(backlinksData);
-				} else {
-					if (!cancelled) setBacklinks([]);
-				}
-
-			} catch (e: any) {
-				console.error("PostEditor: Failed to load post data", e);
-				if (!cancelled) setError(e?.message || "Failed to load note");
-			} finally {
-				if (!cancelled) {
-					setLoading(false);
-					setMentionsLoaded(true);
-					setBacklinksLoading(false);
-				}
+			} catch (e) {
+				// Fail silently for mentions - not critical for post display
+				if (!cancelled) setPostMentions([]);
 			}
 		};
 
-		loadAllData();
+		// Start loading content immediately
+		loadPostContent();
+		// Load mentions in parallel
+		loadPostMentions();
+		// Load backlinks (lowest priority)
+		loadBacklinks();
+
 		return () => {
 			cancelled = true;
 		};
-	}, [id, token]);
+	}, [id, token, loadBacklinks]);
 
-	if ((loading && !content) || !mentionsLoaded)
-		return (
-			<div className="app-container">
-				<p>Loading…</p>
-			</div>
-		);
 	if (error)
 		return (
 			<div className="app-container">
