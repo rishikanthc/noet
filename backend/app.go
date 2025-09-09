@@ -1287,6 +1287,10 @@ func (a *App) routes() {
                     http.Error(w, "db error", http.StatusInternalServerError)
                     return
                 }
+                
+                // Invalidate posts cache
+                a.cacheInvalidatePattern("posts_list_")
+                
                 w.WriteHeader(http.StatusNoContent)
             })(w, r)
             return

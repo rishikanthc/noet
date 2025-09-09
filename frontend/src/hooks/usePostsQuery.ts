@@ -104,9 +104,10 @@ async function togglePostPrivacy(id: string, token: string): Promise<Note> {
 // Hook to fetch all posts
 export function usePostsQuery(token: string | null) {
   const isAuthenticated = !!token;
+  const queryKey = postsQueryKeys.list(isAuthenticated);
   
   return useQuery({
-    queryKey: postsQueryKeys.list(isAuthenticated),
+    queryKey,
     queryFn: () => fetchPosts(token),
     staleTime: 30 * 1000, // Consider data stale after 30 seconds
     gcTime: 5 * 60 * 1000, // Keep in cache for 5 minutes
@@ -132,12 +133,12 @@ export function useCreatePost() {
   return useMutation({
     mutationFn: ({ token }: { token: string }) => createPost(token),
     onSuccess: (newPost) => {
-      // Add the new post to the cache optimistically
+      // Add the new post to the cache optimistically and sort
       queryClient.setQueryData(
         postsQueryKeys.list(true),
         (oldData: Note[] | undefined) => {
           if (!oldData) return [newPost];
-          return [newPost, ...oldData];
+          return sortNotes([newPost, ...oldData]);
         }
       );
       
@@ -155,20 +156,18 @@ export function useUpdatePost() {
     mutationFn: ({ id, content, token }: { id: string; content: string; token: string }) =>
       updatePost(id, content, token),
     onSuccess: (updatedPost) => {
-      console.log("useUpdatePost onSuccess: Updating caches for post", updatedPost);
-      
       // Update the post in cache
       queryClient.setQueryData(postsQueryKeys.detail(updatedPost.id), updatedPost);
       
-      // Update the post in the posts list
+      // Update the post in the posts list and ensure proper sorting
       queryClient.setQueryData(
         postsQueryKeys.list(true),
         (oldData: Note[] | undefined) => {
-          console.log("useUpdatePost: Updating authenticated posts list", { oldData: oldData?.length, updatedPost: updatedPost.title });
           if (!oldData) return [updatedPost];
-          return oldData.map((post) =>
+          const updatedList = oldData.map((post) =>
             post.id === updatedPost.id ? updatedPost : post
           );
+          return sortNotes(updatedList);
         }
       );
       
@@ -177,17 +176,16 @@ export function useUpdatePost() {
         queryClient.setQueryData(
           postsQueryKeys.list(false),
           (oldData: Note[] | undefined) => {
-            console.log("useUpdatePost: Updating public posts list", { oldData: oldData?.length, updatedPost: updatedPost.title });
             if (!oldData) return [updatedPost];
-            return oldData.map((post) =>
+            const updatedList = oldData.map((post) =>
               post.id === updatedPost.id ? updatedPost : post
             );
+            return sortNotes(updatedList);
           }
         );
       }
       
       // Invalidate posts lists to trigger background refetch
-      console.log("useUpdatePost: Invalidating posts lists");
       queryClient.invalidateQueries({ queryKey: postsQueryKeys.lists() });
     },
   });
@@ -205,7 +203,7 @@ export function useDeletePost() {
         postsQueryKeys.list(true),
         (oldData: Note[] | undefined) => {
           if (!oldData) return [];
-          return oldData.filter((post) => post.id.toString() !== id);
+          return oldData.filter((post) => post.id !== parseInt(id, 10));
         }
       );
       
@@ -213,14 +211,14 @@ export function useDeletePost() {
         postsQueryKeys.list(false),
         (oldData: Note[] | undefined) => {
           if (!oldData) return [];
-          return oldData.filter((post) => post.id.toString() !== id);
+          return oldData.filter((post) => post.id !== parseInt(id, 10));
         }
       );
       
       // Remove post detail from cache
       queryClient.removeQueries({ queryKey: postsQueryKeys.detail(id) });
       
-      // Invalidate posts lists
+      // Invalidate posts lists to trigger background refetch
       queryClient.invalidateQueries({ queryKey: postsQueryKeys.lists() });
     },
   });
@@ -237,7 +235,7 @@ export function useTogglePostPrivacy() {
       // Update the post in cache
       queryClient.setQueryData(postsQueryKeys.detail(updatedPost.id), updatedPost);
       
-      // Update the authenticated posts list
+      // Update the authenticated posts list (no sorting since privacy doesn't change updatedAt)
       queryClient.setQueryData(
         postsQueryKeys.list(true),
         (oldData: Note[] | undefined) => {
