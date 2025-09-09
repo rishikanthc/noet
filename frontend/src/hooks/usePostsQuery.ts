@@ -15,7 +15,7 @@ export const postsQueryKeys = {
 async function fetchPosts(token: string | null): Promise<Note[]> {
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   
-  const response = await fetch('/api/posts', { headers });
+  const response = await fetch('/api/posts', { headers, cache: 'no-cache' });
   
   if (!response.ok) {
     if (response.status >= 500) {
@@ -34,7 +34,7 @@ async function fetchPosts(token: string | null): Promise<Note[]> {
 async function fetchPost(id: string, token: string | null): Promise<Note> {
   const headers = token ? { Authorization: `Bearer ${token}` } : {};
   
-  const response = await fetch(`/api/posts/${id}`, { headers });
+  const response = await fetch(`/api/posts/${id}`, { headers, cache: 'no-cache' });
   
   if (!response.ok) {
     throw new Error(response.status === 404 ? 'Post not found' : 'Failed to load post');
@@ -48,6 +48,7 @@ async function createPost(token: string): Promise<Note> {
   const response = await fetch('/api/posts', {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-cache'
   });
   
   if (!response.ok) {
@@ -66,6 +67,7 @@ async function updatePost(id: string, content: string, token: string): Promise<N
       Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({ content }),
+    cache: 'no-cache'
   });
   
   if (!response.ok) {
@@ -80,6 +82,7 @@ async function deletePost(id: string, token: string): Promise<void> {
   const response = await fetch(`/api/posts/${id}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-cache'
   });
   
   if (!response.ok) {
@@ -92,6 +95,7 @@ async function togglePostPrivacy(id: string, token: string): Promise<Note> {
   const response = await fetch(`/api/posts/${id}/publish`, {
     method: 'PUT',
     headers: { Authorization: `Bearer ${token}` },
+    cache: 'no-cache'
   });
   
   if (!response.ok) {

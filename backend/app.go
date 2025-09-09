@@ -1081,18 +1081,6 @@ func (a *App) routes() {
             isAuth := a.isAuthenticated(r)
             a.Logger.Debug("Fetching posts list", "authenticated", isAuth)
             
-            // Check cache first
-            cacheKey := fmt.Sprintf("posts_list_%t", isAuth)
-            if cached, found := a.cacheGet(cacheKey); found {
-                a.Logger.Debug("Serving posts from cache", "authenticated", isAuth)
-                // Set cache headers for cached responses
-                w.Header().Set("Content-Type", "application/json")
-                w.Header().Set("Cache-Control", "public, max-age=30")
-                w.Header().Set("X-Cache", "HIT")
-                _ = json.NewEncoder(w).Encode(cached)
-                return
-            }
-            
             posts, err := a.getPostsWithPrivacy(isAuth)
             if err != nil {
                 a.Logger.Error("Failed to fetch posts from database", "error", err.Error())
@@ -1100,13 +1088,9 @@ func (a *App) routes() {
                 return
             }
             
-            // Cache the result for 30 seconds
-            a.cacheSet(cacheKey, posts, 30*time.Second)
-            
             a.Logger.Debug("Posts fetched successfully", "count", len(posts), "authenticated", isAuth)
             w.Header().Set("Content-Type", "application/json")
-            w.Header().Set("Cache-Control", "public, max-age=30")
-            w.Header().Set("X-Cache", "MISS")
+            w.Header().Set("Cache-Control", "no-cache")
             _ = json.NewEncoder(w).Encode(posts)
             return
         default:
@@ -1224,7 +1208,7 @@ func (a *App) routes() {
             }
             
             w.Header().Set("Content-Type", "application/json")
-            w.Header().Set("Cache-Control", "public, max-age=60")
+            w.Header().Set("Cache-Control", "no-cache")
             _ = json.NewEncoder(w).Encode(p)
             return
         case http.MethodPut:
