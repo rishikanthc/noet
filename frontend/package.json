@@ -27,7 +27,7 @@
 		"marked": "^16.2.1",
 		"react": "^19.1.1",
 		"react-dom": "^19.1.1",
-		"textforge": "^1.3.2"
+		"textforge": "^1.4.5"
 	},
 	"devDependencies": {
 		"@types/react": "^19.1.10",

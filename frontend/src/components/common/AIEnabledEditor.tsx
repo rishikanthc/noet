@@ -30,11 +30,24 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 			text: string;
 			range: Range | null;
 		} | null>(null);
+		const [isEditorReady, setIsEditorReady] = useState(false);
 		const editorRef = useRef<EditorRef>(null);
 		const selectionTimeoutRef = useRef<NodeJS.Timeout>();
 
 		// Forward ref to parent component
-		React.useImperativeHandle(ref, () => editorRef.current!, []);
+		React.useImperativeHandle(ref, () => {
+			if (!editorRef.current) {
+				return {
+					getContent: () => '',
+					setContent: () => {},
+					focus: () => {},
+					blur: () => {},
+					getElement: () => null,
+					editor: null
+				} as EditorRef;
+			}
+			return editorRef.current;
+		}, []);
 
 		const handleSelection = useCallback(() => {
 			// Clear any existing timeout
@@ -114,7 +127,7 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 		}, [selection]);
 
 		const handleApplyEdit = useCallback((editedText: string) => {
-			if (!savedSelection || !editorRef.current?.editor) {
+			if (!savedSelection || !editorRef.current?.editor || !isEditorReady) {
 				return;
 			}
 
@@ -175,7 +188,7 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 			// Clear selection and state
 			setSelection(null);
 			setSavedSelection(null);
-		}, [savedSelection]);
+		}, [savedSelection, isEditorReady]);
 
 		const handleDialogClose = useCallback(() => {
 			setDialogOpen(false);
@@ -187,30 +200,35 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 			return await editText(savedSelection.text, userPrompt, model);
 		}, [savedSelection, editText]);
 
+		const handleEditorReady = useCallback(() => {
+			setIsEditorReady(true);
+			// Now that editor is ready, we can attach event listeners safely
+			if (settings.ai_enabled && props.editable) {
+				const attachToEditor = () => {
+					const editorEl = editorRef.current?.getElement?.();
+					if (editorEl) {
+						editorEl.addEventListener('mouseup', handleMouseUp);
+						editorEl.addEventListener('keyup', handleKeyUp);
+					}
+				};
+				// Wait a bit to ensure the DOM is fully ready
+				setTimeout(attachToEditor, 100);
+			}
+		}, [settings.ai_enabled, props.editable, handleMouseUp, handleKeyUp]);
+
 		useEffect(() => {
 			// Add global event listeners for text selection
 			document.addEventListener('mouseup', handleMouseUp);
 			document.addEventListener('keyup', handleKeyUp);
 			
-			// Also try to attach directly to the editor element
-			const attachToEditor = () => {
-				const editorEl = editorRef.current?.getElement?.();
-				if (editorEl) {
-					editorEl.addEventListener('mouseup', handleMouseUp);
-					editorEl.addEventListener('keyup', handleKeyUp);
-				} else {
-					// Retry after a short delay
-					setTimeout(attachToEditor, 500);
-				}
-			};
-			attachToEditor();
-			
 			// Clear selection when clicking outside
 			const handleClickOutside = (e: MouseEvent) => {
 				const target = e.target as Element;
-				const editorEl = editorRef.current?.getElement?.();
-				if (editorEl && !editorEl.contains(target)) {
-					setSelection(null);
+				if (isEditorReady) {
+					const editorEl = editorRef.current?.getElement?.();
+					if (editorEl && !editorEl.contains(target)) {
+						setSelection(null);
+					}
 				}
 			};
 			document.addEventListener('mousedown', handleClickOutside);
@@ -231,7 +249,7 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 					clearTimeout(selectionTimeoutRef.current);
 				}
 			};
-		}, [handleMouseUp, handleKeyUp]);
+		}, [handleMouseUp, handleKeyUp, isEditorReady]);
 
 		// Hide AI button when dialog is open or AI is disabled
 		const showAIButton = selection && !dialogOpen && settings.ai_enabled && props.editable;
@@ -242,6 +260,7 @@ export const AIEnabledEditor = forwardRef<EditorRef, AIEnabledEditorProps>(
 				<Editor
 					ref={editorRef}
 					{...props}
+					onReady={handleEditorReady}
 				/>
 				
 				{showAIButton && (
