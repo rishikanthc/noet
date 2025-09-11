@@ -131,6 +131,18 @@ func (a *App) Handler() http.Handler {
     return gzipMiddleware(a.Mux)
 }
 
+// Close closes the database connection gracefully
+func (a *App) Close() error {
+    if a.DB != nil {
+        // Force final WAL checkpoint before closing
+        if _, err := a.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE);`); err != nil {
+            a.Logger.Debug("Final WAL checkpoint failed", "error", err.Error())
+        }
+        return a.DB.Close()
+    }
+    return nil
+}
+
 func NewApp(dbPath string) (*App, error) {
     db, err := sql.Open("sqlite", dbPath)
     if err != nil {
@@ -637,8 +649,8 @@ func extractTitleFromHTML(htmlStr string) string {
 // extractMentionsFromHTML extracts mention links from HTML content
 // Returns a slice of target post IDs that are mentioned
 func extractMentionsFromHTML(htmlStr string) []int64 {
-    // Regex to find mention links with both data-mention-id and data-link-type="bidirectional" in any order
-    re := regexp.MustCompile(`<a[^>]*class="mention"[^>]*data-mention-id="(\d+)"[^>]*>`)
+    // Regex to find mention links with data-mention-id attribute (order-independent)
+    re := regexp.MustCompile(`<a[^>]*data-mention-id="(\d+)"[^>]*>`)
     matches := re.FindAllStringSubmatch(htmlStr, -1)
     
     var mentionIDs []int64
@@ -657,9 +669,17 @@ func extractMentionsFromHTML(htmlStr string) []int64 {
 func (a *App) updatePostLinks(sourcePostID int64, htmlContent string) error {
     // Extract mentions from the HTML content
     mentionIDs := extractMentionsFromHTML(htmlContent)
+    a.Logger.Debug("updatePostLinks", "sourcePostID", sourcePostID, "mentionIDs", mentionIDs, "htmlLength", len(htmlContent))
+    
+    // Begin transaction to ensure atomicity
+    tx, err := a.DB.Begin()
+    if err != nil {
+        return fmt.Errorf("failed to begin transaction: %v", err)
+    }
+    defer tx.Rollback() // Rollback if not committed
     
     // Remove existing links for this source post
-    _, err := a.DB.Exec(`DELETE FROM post_links WHERE source_post_id = ?`, sourcePostID)
+    _, err = tx.Exec(`DELETE FROM post_links WHERE source_post_id = ?`, sourcePostID)
     if err != nil {
         return fmt.Errorf("failed to delete existing links: %v", err)
     }
@@ -674,7 +694,7 @@ func (a *App) updatePostLinks(sourcePostID int64, htmlContent string) error {
         
         // Check if target post exists
         var exists int
-        err = a.DB.QueryRow(`SELECT 1 FROM posts WHERE id = ?`, targetID).Scan(&exists)
+        err = tx.QueryRow(`SELECT 1 FROM posts WHERE id = ?`, targetID).Scan(&exists)
         if err == sql.ErrNoRows {
             // Target post doesn't exist, skip this link
             continue
@@ -683,13 +703,24 @@ func (a *App) updatePostLinks(sourcePostID int64, htmlContent string) error {
         }
         
         // Insert the link
-        _, err = a.DB.Exec(`
+        _, err = tx.Exec(`
             INSERT OR IGNORE INTO post_links (source_post_id, target_post_id, created_at) 
             VALUES (?, ?, ?)
         `, sourcePostID, targetID, now)
         if err != nil {
             return fmt.Errorf("failed to insert link: %v", err)
         }
+    }
+    
+    // Commit the transaction
+    if err = tx.Commit(); err != nil {
+        return fmt.Errorf("failed to commit transaction: %v", err)
+    }
+    
+    // Force WAL checkpoint to ensure data persists immediately
+    if _, err = a.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE);`); err != nil {
+        // Log error but don't fail - data is already committed
+        a.Logger.Debug("WAL checkpoint failed", "error", err.Error())
     }
     
     return nil

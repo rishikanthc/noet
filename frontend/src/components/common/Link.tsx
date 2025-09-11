@@ -1,4 +1,4 @@
-import { ReactNode, MouseEvent, memo } from 'react';
+import { ReactNode, MouseEvent, memo, CSSProperties } from 'react';
 import { navigateTo } from '../../lib/router';
 import { useAuth } from '../../hooks/useAuth';
 import { usePrefetch } from '../../hooks/usePrefetch';
@@ -9,10 +9,12 @@ interface LinkProps {
   className?: string;
   target?: string;
   rel?: string;
-  onMouseEnter?: () => void;
+  style?: CSSProperties;
+  onMouseEnter?: (e: MouseEvent<HTMLAnchorElement>) => void;
+  onMouseLeave?: (e: MouseEvent<HTMLAnchorElement>) => void;
 }
 
-export const Link = memo(function Link({ href, children, className, target, rel, onMouseEnter }: LinkProps) {
+export const Link = memo(function Link({ href, children, className, target, rel, style, onMouseEnter, onMouseLeave }: LinkProps) {
   const { token } = useAuth();
   const { prefetchPost, prefetchPosts, prefetchSettings } = usePrefetch(token);
   
@@ -28,8 +30,8 @@ export const Link = memo(function Link({ href, children, className, target, rel,
     navigateTo(href);
   };
   
-  const handleMouseEnter = () => {
-    onMouseEnter?.();
+  const handleMouseEnter = (e: MouseEvent<HTMLAnchorElement>) => {
+    onMouseEnter?.(e);
     
     if (!isExternal && token) {
       // Prefetch data based on route
@@ -50,8 +52,10 @@ export const Link = memo(function Link({ href, children, className, target, rel,
       className={className}
       target={target}
       rel={rel}
+      style={style}
       onClick={handleClick}
       onMouseEnter={handleMouseEnter}
+      onMouseLeave={onMouseLeave}
     >
       {children}
     </a>
