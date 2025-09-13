@@ -546,6 +546,151 @@ header h1 {
   color: #000;
 }
 
+/* Responsive Navigation */
+
+/* Desktop navigation - default visible */
+.desktop-nav {
+  display: flex;
+}
+
+/* Mobile navigation - hidden by default */
+.mobile-nav {
+  display: none;
+  position: relative;
+}
+
+/* Mobile menu button */
+.mobile-menu-button {
+  background: transparent;
+  border: none;
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  border-radius: 4px;
+  transition: color 0.2s ease;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.mobile-menu-button:hover {
+  color: #000;
+  background: transparent;
+}
+
+/* Mobile menu backdrop */
+.mobile-menu-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.1);
+  z-index: 998;
+  animation: fadeIn 0.1s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Mobile dropdown menu */
+.mobile-menu-dropdown {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  background: white;
+  border: 1px solid #e5e5e5;
+  border-radius: 8px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.1);
+  min-width: 200px;
+  z-index: 999;
+  animation: slideDown 0.1s ease;
+  overflow: hidden;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Mobile menu items */
+.mobile-menu-item {
+  display: block;
+  padding: 12px 16px;
+  color: #333;
+  text-decoration: none;
+  background: transparent;
+  border: none;
+  width: 100%;
+  text-align: left;
+  font-size: 14px;
+  font-weight: 400;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.mobile-menu-item:last-child {
+  border-bottom: none;
+}
+
+.mobile-menu-item:hover {
+  background-color: #f8f9fa;
+  text-decoration: none;
+}
+
+.mobile-menu-item.active {
+  color: #000;
+  font-weight: 500;
+  background-color: #f0f0f0;
+}
+
+.mobile-menu-item.mobile-menu-button {
+  font-family: inherit;
+}
+
+.mobile-menu-item:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.mobile-menu-item:disabled:hover {
+  background: transparent;
+}
+
+/* Mobile menu separator */
+.mobile-menu-separator {
+  height: 1px;
+  background-color: #e5e5e5;
+  margin: 4px 0;
+}
+
+/* Media queries for responsive behavior */
+@media (max-width: 767px) {
+  .desktop-nav {
+    display: none;
+  }
+
+  .mobile-nav {
+    display: block;
+  }
+
+  /* Adjust header padding on mobile */
+  .site-header-content {
+    padding: 0 16px;
+  }
+}
+
 /* Update page containers to account for header */
 .home-container {
   position: relative;
