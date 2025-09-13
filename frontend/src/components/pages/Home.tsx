@@ -50,11 +50,37 @@ export const Home = memo(function Home() {
 		if (creating || !isAuthenticated || !token) return;
 		setCreating(true);
 		try {
+			console.log('🏠 Home: Creating new post...');
+			console.log('🏠 Home: Browser info:', {
+				userAgent: navigator.userAgent,
+				isFirefox: navigator.userAgent.toLowerCase().includes('firefox'),
+				currentUrl: window.location.href
+			});
+			console.log('🏠 Home: About to call createPostMutation.mutateAsync...');
+
 			const note = await createPostMutation.mutateAsync({ token });
+
+			console.log('🏠 Home: Post created successfully, navigating to:', `/posts/${note.id}`);
 			navigateTo(`/posts/${note.id}`);
 		} catch (e) {
-			console.error("Home: Failed to create new post", e);
-			alert("Failed to create a new post");
+			console.error("🔥 Home: Failed to create new post", {
+				error: e,
+				errorName: e instanceof Error ? e.name : 'Unknown',
+				errorMessage: e instanceof Error ? e.message : 'Unknown error',
+				errorStack: e instanceof Error ? e.stack : undefined,
+				errorString: String(e),
+				errorType: typeof e,
+				token: token ? 'present' : 'missing',
+				isAuthenticated,
+				userAgent: navigator.userAgent,
+				isFirefox: navigator.userAgent.toLowerCase().includes('firefox'),
+				currentUrl: window.location.href
+			});
+
+			// Also log the raw error object to see all its properties
+			console.error("🔥 Home: Raw error object:", e);
+
+			alert(`Failed to create a new post: ${e instanceof Error ? e.message : 'Unknown error'}`);
 		} finally {
 			setCreating(false);
 		}

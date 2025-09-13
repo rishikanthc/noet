@@ -45,17 +45,110 @@ async function fetchPost(id: string, token: string | null): Promise<Note> {
 
 // Create a new post
 async function createPost(token: string): Promise<Note> {
-  const response = await fetch('/api/posts', {
+  console.log('🚀 createPost: Starting post creation');
+  console.log('🚀 createPost: Token present:', !!token);
+  console.log('🚀 createPost: User Agent:', navigator.userAgent);
+  console.log('🚀 createPost: Current URL:', window.location.href);
+
+  // Firefox CORS fix: Add Content-Type and empty JSON body for consistent CORS handling
+  // This ensures Firefox treats this the same as other working POST endpoints like login
+  // which also send JSON bodies and work properly in production
+
+  const fetchOptions = {
     method: 'POST',
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-cache'
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to create post: ${response.status}`);
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: '{}', // Empty JSON body for consistent CORS handling
+    cache: 'no-cache' as RequestCache
+  };
+
+  console.log('🚀 createPost: Fetch options:', JSON.stringify(fetchOptions, null, 2));
+  console.log('🚀 createPost: About to call fetch...');
+
+  let response: Response;
+  try {
+    response = await fetch('/api/posts', fetchOptions);
+    console.log('🚀 createPost: Fetch completed successfully');
+    console.log('🚀 createPost: Response status:', response.status);
+    console.log('🚀 createPost: Response ok:', response.ok);
+    console.log('🚀 createPost: Response headers:', Object.fromEntries(response.headers.entries()));
+  } catch (fetchError) {
+    console.error('🔥 createPost: Fetch failed with error:', {
+      error: fetchError,
+      errorName: fetchError instanceof Error ? fetchError.name : 'Unknown',
+      errorMessage: fetchError instanceof Error ? fetchError.message : 'Unknown error',
+      errorStack: fetchError instanceof Error ? fetchError.stack : 'No stack',
+      userAgent: navigator.userAgent,
+      currentUrl: window.location.href
+    });
+    throw fetchError;
   }
-  
-  return response.json();
+
+  // Clone response for error handling to avoid double-read issues in Firefox
+  console.log('🚀 createPost: Cloning response for Firefox compatibility');
+  const responseClone = response.clone();
+  console.log('🚀 createPost: Response cloned successfully');
+
+  if (!response.ok) {
+    console.error('🔥 createPost: Response not OK, handling error');
+    console.log('🚀 createPost: Reading error text from cloned response...');
+
+    let errorText: string;
+    try {
+      errorText = await responseClone.text();
+      console.log('🚀 createPost: Error text read successfully:', errorText);
+    } catch (textError) {
+      console.error('🔥 createPost: Failed to read error text:', textError);
+      errorText = 'Unknown error';
+    }
+
+    const errorDetails = {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      body: errorText,
+      userAgent: navigator.userAgent
+    };
+
+    console.error('🔥 createPost: Complete error details:', errorDetails);
+    throw new Error(`Failed to create post: ${response.status} - ${errorText}`);
+  }
+
+  console.log('🚀 createPost: Response OK, parsing JSON...');
+
+  try {
+    console.log('🚀 createPost: About to call responseClone.json()...');
+    const result = await responseClone.json();
+    console.log('🚀 createPost: JSON parsed successfully:', result);
+    console.log('🚀 createPost: Post creation completed successfully!');
+    return result;
+  } catch (parseError) {
+    console.error('🔥 createPost: JSON parsing failed:', {
+      parseError,
+      errorName: parseError instanceof Error ? parseError.name : 'Unknown',
+      errorMessage: parseError instanceof Error ? parseError.message : 'Unknown parsing error',
+      errorStack: parseError instanceof Error ? parseError.stack : 'No stack',
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      responseType: response.headers.get('content-type'),
+      userAgent: navigator.userAgent
+    });
+
+    // Use a fresh clone to get raw text for debugging (Firefox-safe)
+    console.log('🚀 createPost: Attempting to read raw response text for debugging...');
+    try {
+      const debugResponse = response.clone();
+      const rawText = await debugResponse.text();
+      console.error('🔥 createPost: Raw response body:', rawText);
+    } catch (debugError) {
+      console.error('🔥 createPost: Could not read raw response text:', debugError);
+    }
+
+    throw new Error(`Failed to parse create post response: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`);
+  }
 }
 
 // Update a post

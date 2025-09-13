@@ -1,34 +1,33 @@
 package main
 
 import (
-    "bytes"
-    "compress/gzip"
-    "crypto/rand"
-    "crypto/sha256"
-    "database/sql"
-    "embed"
-    "encoding/base64"
-    "encoding/json"
-    "errors"
-    "fmt"
-    "hash/fnv"
-    "io"
-    "log/slog"
-    "mime"
-    "net/http"
-    "os"
-    "path"
-    "path/filepath"
-    "regexp"
-    "strconv"
-    "strings"
-    "sync"
-    "time"
+	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
+	"embed"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"hash/fnv"
+	"io"
+	"log/slog"
+	"mime"
+	"net/http"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
 
-    _ "modernc.org/sqlite"
-    "golang.org/x/crypto/bcrypt"
-    "github.com/golang-jwt/jwt/v5"
-    "github.com/google/uuid"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 //go:embed static/*
@@ -36,120 +35,77 @@ var staticFS embed.FS
 
 // CacheItem represents a cached item with expiration
 type CacheItem struct {
-    Data      interface{}
-    ExpiresAt time.Time
+	Data      interface{}
+	ExpiresAt time.Time
 }
 
 type App struct {
-    DB        *sql.DB
-    Mux       *http.ServeMux
-    JWTSecret []byte
-    Logger    *slog.Logger
+	DB        *sql.DB
+	Mux       *http.ServeMux
+	JWTSecret []byte
+	Logger    *slog.Logger
 
-    // Simple in-memory cache
-    cacheMu sync.RWMutex
-    cache   map[string]CacheItem
+	// Simple in-memory cache
+	cacheMu sync.RWMutex
+	cache   map[string]CacheItem
 }
 
 type Post struct {
-    ID        int64     `json:"id"`
-    Title     *string   `json:"title,omitempty"`
-    Content   string    `json:"content"`
-    CreatedAt time.Time `json:"createdAt"`
-    UpdatedAt time.Time `json:"updatedAt"`
-    IsPrivate bool      `json:"isPrivate"`
+	ID        int64     `json:"id"`
+	Title     *string   `json:"title,omitempty"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"createdAt"`
+	UpdatedAt time.Time `json:"updatedAt"`
+	IsPrivate bool      `json:"isPrivate"`
 }
 
 type User struct {
-    ID           int64     `json:"id"`
-    Username     string    `json:"username"`
-    PasswordHash string    `json:"-"`
-    CreatedAt    time.Time `json:"createdAt"`
+	ID           int64     `json:"id"`
+	Username     string    `json:"username"`
+	PasswordHash string    `json:"-"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 type Attachment struct {
-    ID        int64     `json:"id"`
-    Filename  string    `json:"filename"`
-    OriginalName string `json:"originalName"`
-    MimeType  string    `json:"mimeType"`
-    Size      int64     `json:"size"`
-    CreatedAt time.Time `json:"createdAt"`
+	ID           int64     `json:"id"`
+	Filename     string    `json:"filename"`
+	OriginalName string    `json:"originalName"`
+	MimeType     string    `json:"mimeType"`
+	Size         int64     `json:"size"`
+	CreatedAt    time.Time `json:"createdAt"`
 }
 
 type Claims struct {
-    UserID   int64  `json:"user_id"`
-    Username string `json:"username"`
-    jwt.RegisteredClaims
+	UserID   int64  `json:"user_id"`
+	Username string `json:"username"`
+	jwt.RegisteredClaims
 }
 
-// gzipResponseWriter wraps http.ResponseWriter to compress responses
-type gzipResponseWriter struct {
-    http.ResponseWriter
-    Writer io.Writer
-}
 
-func (w gzipResponseWriter) Write(b []byte) (int, error) {
-    return w.Writer.Write(b)
-}
-
-// gzipMiddleware compresses responses when the client supports it
-func gzipMiddleware(next http.Handler) http.Handler {
-    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        // Check if client accepts gzip encoding
-        if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-            next.ServeHTTP(w, r)
-            return
-        }
-
-        // Don't compress certain file types or already compressed content
-        contentType := w.Header().Get("Content-Type")
-        if strings.Contains(contentType, "image/") || 
-           strings.Contains(contentType, "video/") || 
-           strings.Contains(contentType, "audio/") ||
-           strings.Contains(r.URL.Path, ".gz") {
-            next.ServeHTTP(w, r)
-            return
-        }
-
-        // Set gzip headers
-        w.Header().Set("Content-Encoding", "gzip")
-        w.Header().Set("Vary", "Accept-Encoding")
-
-        // Create gzip writer
-        gz := gzip.NewWriter(w)
-        defer gz.Close()
-
-        // Wrap the ResponseWriter
-        gzw := gzipResponseWriter{ResponseWriter: w, Writer: gz}
-        
-        next.ServeHTTP(gzw, r)
-    })
-}
-
-// Handler returns the main HTTP handler with middleware applied
+// Handler returns the main HTTP handler
 func (a *App) Handler() http.Handler {
-    return gzipMiddleware(a.Mux)
+	return a.Mux
 }
 
 // Close closes the database connection gracefully
 func (a *App) Close() error {
-    if a.DB != nil {
-        // Force final WAL checkpoint before closing
-        if _, err := a.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE);`); err != nil {
-            a.Logger.Debug("Final WAL checkpoint failed", "error", err.Error())
-        }
-        return a.DB.Close()
-    }
-    return nil
+	if a.DB != nil {
+		// Force final WAL checkpoint before closing
+		if _, err := a.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE);`); err != nil {
+			a.Logger.Debug("Final WAL checkpoint failed", "error", err.Error())
+		}
+		return a.DB.Close()
+	}
+	return nil
 }
 
 func NewApp(dbPath string) (*App, error) {
-    db, err := sql.Open("sqlite", dbPath)
-    if err != nil {
-        return nil, err
-    }
-    // Pragmas for reliability and performance
-    pragmas := `
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, err
+	}
+	// Pragmas for reliability and performance
+	pragmas := `
         PRAGMA journal_mode=WAL;
         PRAGMA foreign_keys=ON;
         PRAGMA synchronous=NORMAL;
@@ -158,60 +114,60 @@ func NewApp(dbPath string) (*App, error) {
         PRAGMA temp_store=memory;
         PRAGMA mmap_size=268435456;
     `
-    if _, err := db.Exec(pragmas); err != nil {
-        return nil, err
-    }
-    
-    // Configure connection pool for performance
-    db.SetMaxOpenConns(25)
-    db.SetMaxIdleConns(25)
-    db.SetConnMaxLifetime(5 * time.Minute)
-    
-    if err := initSchema(db); err != nil {
-        return nil, err
-    }
-    if err := runMigrations(db); err != nil {
-        return nil, err
-    }
+	if _, err := db.Exec(pragmas); err != nil {
+		return nil, err
+	}
 
-    // Check if debug logging should be enabled (only set once, not forced)
-    var debugSet bool
-    err = db.QueryRow(`SELECT COUNT(*) > 0 FROM settings WHERE key = 'log_level'`).Scan(&debugSet)
-    if err == nil && !debugSet {
-        // Set debug on first run only
-        _, err = db.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('log_level', 'DEBUG', ?)`, time.Now())
-        if err != nil {
-            return nil, fmt.Errorf("failed to set initial log level: %v", err)
-        }
-    }
+	// Configure connection pool for performance
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(25)
+	db.SetConnMaxLifetime(5 * time.Minute)
 
-    // Get or generate persistent JWT secret
-    jwtSecret, err := getOrCreateJWTSecret(db)
-    if err != nil {
-        return nil, fmt.Errorf("failed to get JWT secret: %v", err)
-    }
+	if err := initSchema(db); err != nil {
+		return nil, err
+	}
+	if err := runMigrations(db); err != nil {
+		return nil, err
+	}
 
-    // Initialize logger with database-stored log level
-    logger, err := initLogger(db)
-    if err != nil {
-        return nil, fmt.Errorf("failed to initialize logger: %v", err)
-    }
+	// Check if debug logging should be enabled (only set once, not forced)
+	var debugSet bool
+	err = db.QueryRow(`SELECT COUNT(*) > 0 FROM settings WHERE key = 'log_level'`).Scan(&debugSet)
+	if err == nil && !debugSet {
+		// Set debug on first run only
+		_, err = db.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('log_level', 'DEBUG', ?)`, time.Now())
+		if err != nil {
+			return nil, fmt.Errorf("failed to set initial log level: %v", err)
+		}
+	}
 
-    a := &App{
-        DB:        db, 
-        Mux:       http.NewServeMux(), 
-        JWTSecret: jwtSecret,
-        Logger:    logger,
-        cache:     make(map[string]CacheItem),
-    }
-    
-    a.Logger.Info("Application initialized successfully", "dbPath", dbPath)
-    a.routes()
-    return a, nil
+	// Get or generate persistent JWT secret
+	jwtSecret, err := getOrCreateJWTSecret(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get JWT secret: %v", err)
+	}
+
+	// Initialize logger with database-stored log level
+	logger, err := initLogger(db)
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize logger: %v", err)
+	}
+
+	a := &App{
+		DB:        db,
+		Mux:       http.NewServeMux(),
+		JWTSecret: jwtSecret,
+		Logger:    logger,
+		cache:     make(map[string]CacheItem),
+	}
+
+	a.Logger.Info("Application initialized successfully", "dbPath", dbPath)
+	a.routes()
+	return a, nil
 }
 
 func initSchema(db *sql.DB) error {
-    _, err := db.Exec(`
+	_, err := db.Exec(`
 CREATE TABLE IF NOT EXISTS posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NULL,
@@ -272,1602 +228,1629 @@ CREATE INDEX IF NOT EXISTS idx_posts_is_private ON posts(is_private);
 -- Composite index for optimal query performance
 CREATE INDEX IF NOT EXISTS idx_posts_privacy_updated ON posts(is_private, updated_at DESC, created_at DESC);
 `)
-    return err
+	return err
 }
 
 func runMigrations(db *sql.DB) error {
-    // Check if is_private column exists
-    row := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('posts') WHERE name='is_private'`)
-    var count int
-    if err := row.Scan(&count); err == nil && count == 0 {
-        // Add is_private column to existing posts table
-        _, err := db.Exec(`ALTER TABLE posts ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT 0`)
-        if err != nil {
-            return fmt.Errorf("failed to add is_private column: %v", err)
-        }
-    }
-    return nil
+	// Check if is_private column exists
+	row := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('posts') WHERE name='is_private'`)
+	var count int
+	if err := row.Scan(&count); err == nil && count == 0 {
+		// Add is_private column to existing posts table
+		_, err := db.Exec(`ALTER TABLE posts ADD COLUMN is_private BOOLEAN NOT NULL DEFAULT 0`)
+		if err != nil {
+			return fmt.Errorf("failed to add is_private column: %v", err)
+		}
+	}
+	return nil
 }
 
 // generateETag generates an ETag for file content
 func generateETag(data []byte) string {
-    h := fnv.New32a()
-    h.Write(data)
-    return fmt.Sprintf(`"%x"`, h.Sum32())
+	h := fnv.New32a()
+	h.Write(data)
+	return fmt.Sprintf(`"%x"`, h.Sum32())
 }
 
 // isStaticAsset checks if the file is a static asset that should be cached long-term
 func isStaticAsset(path string) bool {
-    ext := strings.ToLower(filepath.Ext(path))
-    return ext == ".js" || ext == ".css" || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".svg" || ext == ".ico" || ext == ".woff" || ext == ".woff2" || ext == ".ttf"
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".js" || ext == ".css" || ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".gif" || ext == ".svg" || ext == ".ico" || ext == ".woff" || ext == ".woff2" || ext == ".ttf"
 }
 
 // setStaticCacheHeaders sets appropriate cache headers for static files
 func setStaticCacheHeaders(w http.ResponseWriter, path string, etag string) {
-    if isStaticAsset(path) {
-        // Static assets - cache for 1 year
-        w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-    } else {
-        // HTML files - cache for 5 minutes
-        w.Header().Set("Cache-Control", "public, max-age=300")
-    }
-    w.Header().Set("ETag", etag)
+	if isStaticAsset(path) {
+		// Static assets - cache for 1 year
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	} else {
+		// HTML files - cache for 5 minutes
+		w.Header().Set("Cache-Control", "public, max-age=300")
+	}
+	w.Header().Set("ETag", etag)
 }
 
 // Cache helper methods
 func (a *App) cacheGet(key string) (interface{}, bool) {
-    a.cacheMu.RLock()
-    defer a.cacheMu.RUnlock()
-    
-    item, exists := a.cache[key]
-    if !exists || time.Now().After(item.ExpiresAt) {
-        return nil, false
-    }
-    return item.Data, true
+	a.cacheMu.RLock()
+	defer a.cacheMu.RUnlock()
+
+	item, exists := a.cache[key]
+	if !exists || time.Now().After(item.ExpiresAt) {
+		return nil, false
+	}
+	return item.Data, true
 }
 
 func (a *App) cacheSet(key string, data interface{}, duration time.Duration) {
-    a.cacheMu.Lock()
-    defer a.cacheMu.Unlock()
-    
-    a.cache[key] = CacheItem{
-        Data:      data,
-        ExpiresAt: time.Now().Add(duration),
-    }
+	a.cacheMu.Lock()
+	defer a.cacheMu.Unlock()
+
+	a.cache[key] = CacheItem{
+		Data:      data,
+		ExpiresAt: time.Now().Add(duration),
+	}
 }
 
 func (a *App) cacheDelete(key string) {
-    a.cacheMu.Lock()
-    defer a.cacheMu.Unlock()
-    delete(a.cache, key)
+	a.cacheMu.Lock()
+	defer a.cacheMu.Unlock()
+	delete(a.cache, key)
 }
 
 func (a *App) cacheInvalidatePattern(pattern string) {
-    a.cacheMu.Lock()
-    defer a.cacheMu.Unlock()
-    
-    for key := range a.cache {
-        if strings.Contains(key, pattern) {
-            delete(a.cache, key)
-        }
-    }
+	a.cacheMu.Lock()
+	defer a.cacheMu.Unlock()
+
+	for key := range a.cache {
+		if strings.Contains(key, pattern) {
+			delete(a.cache, key)
+		}
+	}
 }
 
 func getOrCreateJWTSecret(db *sql.DB) ([]byte, error) {
-    var secretStr string
-    err := db.QueryRow(`SELECT value FROM settings WHERE key = 'jwt_secret'`).Scan(&secretStr)
-    
-    if err == sql.ErrNoRows {
-        // Generate new secret
-        secret := make([]byte, 32)
-        if _, err := rand.Read(secret); err != nil {
-            return nil, err
-        }
-        
-        secretStr = base64.StdEncoding.EncodeToString(secret)
-        
-        // Store in database
-        _, err = db.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('jwt_secret', ?, ?)`, 
-            secretStr, time.Now())
-        if err != nil {
-            return nil, err
-        }
-        
-        return secret, nil
-    } else if err != nil {
-        return nil, err
-    }
-    
-    // Decode existing secret
-    return base64.StdEncoding.DecodeString(secretStr)
+	var secretStr string
+	err := db.QueryRow(`SELECT value FROM settings WHERE key = 'jwt_secret'`).Scan(&secretStr)
+
+	if err == sql.ErrNoRows {
+		// Generate new secret
+		secret := make([]byte, 32)
+		if _, err := rand.Read(secret); err != nil {
+			return nil, err
+		}
+
+		secretStr = base64.StdEncoding.EncodeToString(secret)
+
+		// Store in database
+		_, err = db.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('jwt_secret', ?, ?)`,
+			secretStr, time.Now())
+		if err != nil {
+			return nil, err
+		}
+
+		return secret, nil
+	} else if err != nil {
+		return nil, err
+	}
+
+	// Decode existing secret
+	return base64.StdEncoding.DecodeString(secretStr)
 }
 
 // initLogger initializes the logger with the log level from database
 func initLogger(db *sql.DB) (*slog.Logger, error) {
-    logLevel := getLogLevel(db)
-    
-    var level slog.Level
-    switch strings.ToUpper(logLevel) {
-    case "DEBUG":
-        level = slog.LevelDebug
-    case "INFO":
-        level = slog.LevelInfo
-    default:
-        level = slog.LevelInfo
-    }
-    
-    opts := &slog.HandlerOptions{
-        Level: level,
-    }
-    
-    handler := slog.NewTextHandler(os.Stdout, opts)
-    return slog.New(handler), nil
+	logLevel := getLogLevel(db)
+
+	var level slog.Level
+	switch strings.ToUpper(logLevel) {
+	case "DEBUG":
+		level = slog.LevelDebug
+	case "INFO":
+		level = slog.LevelInfo
+	default:
+		level = slog.LevelInfo
+	}
+
+	opts := &slog.HandlerOptions{
+		Level: level,
+	}
+
+	handler := slog.NewTextHandler(os.Stdout, opts)
+	return slog.New(handler), nil
 }
 
 // getLogLevel retrieves the log level from database, defaults to INFO
 func getLogLevel(db *sql.DB) string {
-    var logLevel string
-    err := db.QueryRow(`SELECT value FROM settings WHERE key = 'log_level'`).Scan(&logLevel)
-    
-    if err == sql.ErrNoRows {
-        // Default to INFO level
-        logLevel = "INFO"
-        // Store default in database
-        db.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('log_level', ?, ?)`, 
-            logLevel, time.Now())
-    } else if err != nil {
-        // If there's an error, default to INFO
-        return "INFO"
-    }
-    
-    return logLevel
+	var logLevel string
+	err := db.QueryRow(`SELECT value FROM settings WHERE key = 'log_level'`).Scan(&logLevel)
+
+	if err == sql.ErrNoRows {
+		// Default to INFO level
+		logLevel = "INFO"
+		// Store default in database
+		db.Exec(`INSERT INTO settings (key, value, updated_at) VALUES ('log_level', ?, ?)`,
+			logLevel, time.Now())
+	} else if err != nil {
+		// If there's an error, default to INFO
+		return "INFO"
+	}
+
+	return logLevel
 }
 
 // updateLogLevel updates the log level in database and reinitializes logger
 func (a *App) updateLogLevel(newLevel string) error {
-    // Validate log level
-    newLevel = strings.ToUpper(newLevel)
-    if newLevel != "DEBUG" && newLevel != "INFO" {
-        return fmt.Errorf("invalid log level: %s. Must be DEBUG or INFO", newLevel)
-    }
-    
-    // Update in database
-    _, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('log_level', ?, ?)`,
-        newLevel, time.Now())
-    if err != nil {
-        return fmt.Errorf("failed to update log level in database: %v", err)
-    }
-    
-    // Reinitialize logger
-    logger, err := initLogger(a.DB)
-    if err != nil {
-        return fmt.Errorf("failed to reinitialize logger: %v", err)
-    }
-    
-    a.Logger = logger
-    a.Logger.Info("Log level updated", "level", newLevel)
-    
-    return nil
+	// Validate log level
+	newLevel = strings.ToUpper(newLevel)
+	if newLevel != "DEBUG" && newLevel != "INFO" {
+		return fmt.Errorf("invalid log level: %s. Must be DEBUG or INFO", newLevel)
+	}
+
+	// Update in database
+	_, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('log_level', ?, ?)`,
+		newLevel, time.Now())
+	if err != nil {
+		return fmt.Errorf("failed to update log level in database: %v", err)
+	}
+
+	// Reinitialize logger
+	logger, err := initLogger(a.DB)
+	if err != nil {
+		return fmt.Errorf("failed to reinitialize logger: %v", err)
+	}
+
+	a.Logger = logger
+	a.Logger.Info("Log level updated", "level", newLevel)
+
+	return nil
 }
 
 func (a *App) createRefreshToken(userID int64) (string, error) {
-    // Generate random refresh token
-    tokenBytes := make([]byte, 32)
-    if _, err := rand.Read(tokenBytes); err != nil {
-        return "", err
-    }
-    
-    refreshToken := base64.URLEncoding.EncodeToString(tokenBytes)
-    tokenHash := sha256.Sum256([]byte(refreshToken))
-    
-    // Clean up expired tokens for this user
-    _, _ = a.DB.Exec(`DELETE FROM refresh_tokens WHERE user_id = ? AND expires_at < ?`, userID, time.Now())
-    
-    // Store in database (30 days expiry)
-    expiresAt := time.Now().Add(30 * 24 * time.Hour)
-    _, err := a.DB.Exec(`INSERT INTO refresh_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)`, 
-        userID, base64.StdEncoding.EncodeToString(tokenHash[:]), expiresAt, time.Now())
-    if err != nil {
-        return "", err
-    }
-    
-    return refreshToken, nil
+	// Generate random refresh token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", err
+	}
+
+	refreshToken := base64.URLEncoding.EncodeToString(tokenBytes)
+	tokenHash := sha256.Sum256([]byte(refreshToken))
+
+	// Clean up expired tokens for this user
+	_, _ = a.DB.Exec(`DELETE FROM refresh_tokens WHERE user_id = ? AND expires_at < ?`, userID, time.Now())
+
+	// Store in database (30 days expiry)
+	expiresAt := time.Now().Add(30 * 24 * time.Hour)
+	_, err := a.DB.Exec(`INSERT INTO refresh_tokens (user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?)`,
+		userID, base64.StdEncoding.EncodeToString(tokenHash[:]), expiresAt, time.Now())
+	if err != nil {
+		return "", err
+	}
+
+	return refreshToken, nil
 }
 
 func (a *App) validateRefreshToken(refreshToken string) (int64, error) {
-    tokenHash := sha256.Sum256([]byte(refreshToken))
-    tokenHashStr := base64.StdEncoding.EncodeToString(tokenHash[:])
-    
-    var userID int64
-    err := a.DB.QueryRow(`SELECT user_id FROM refresh_tokens WHERE token_hash = ? AND expires_at > ?`, 
-        tokenHashStr, time.Now()).Scan(&userID)
-    if err != nil {
-        return 0, err
-    }
-    
-    return userID, nil
+	tokenHash := sha256.Sum256([]byte(refreshToken))
+	tokenHashStr := base64.StdEncoding.EncodeToString(tokenHash[:])
+
+	var userID int64
+	err := a.DB.QueryRow(`SELECT user_id FROM refresh_tokens WHERE token_hash = ? AND expires_at > ?`,
+		tokenHashStr, time.Now()).Scan(&userID)
+	if err != nil {
+		return 0, err
+	}
+
+	return userID, nil
 }
 
 func (a *App) revokeRefreshToken(refreshToken string) error {
-    tokenHash := sha256.Sum256([]byte(refreshToken))
-    tokenHashStr := base64.StdEncoding.EncodeToString(tokenHash[:])
-    
-    _, err := a.DB.Exec(`DELETE FROM refresh_tokens WHERE token_hash = ?`, tokenHashStr)
-    return err
+	tokenHash := sha256.Sum256([]byte(refreshToken))
+	tokenHashStr := base64.StdEncoding.EncodeToString(tokenHash[:])
+
+	_, err := a.DB.Exec(`DELETE FROM refresh_tokens WHERE token_hash = ?`, tokenHashStr)
+	return err
 }
 
 func (a *App) hasAnyUsers() (bool, error) {
-    var count int
-    err := a.DB.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
-    if err != nil {
-        return false, err
-    }
-    return count > 0, nil
+	var count int
+	err := a.DB.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func (a *App) createUser(username, password string) (*User, error) {
-    // Check if any users already exist
-    hasUsers, err := a.hasAnyUsers()
-    if err != nil {
-        return nil, err
-    }
-    if hasUsers {
-        return nil, errors.New("user registration is not allowed - user already exists")
-    }
-    
-    // Hash password
-    passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-    if err != nil {
-        return nil, err
-    }
-    
-    // Insert user
-    res, err := a.DB.Exec(`INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)`, 
-        username, string(passwordHash), time.Now())
-    if err != nil {
-        return nil, err
-    }
-    
-    id, err := res.LastInsertId()
-    if err != nil {
-        return nil, err
-    }
-    
-    return &User{
-        ID:       id,
-        Username: username,
-        CreatedAt: time.Now(),
-    }, nil
+	// Check if any users already exist
+	hasUsers, err := a.hasAnyUsers()
+	if err != nil {
+		return nil, err
+	}
+	if hasUsers {
+		return nil, errors.New("user registration is not allowed - user already exists")
+	}
+
+	// Hash password
+	passwordHash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return nil, err
+	}
+
+	// Insert user
+	res, err := a.DB.Exec(`INSERT INTO users (username, password_hash, created_at) VALUES (?, ?, ?)`,
+		username, string(passwordHash), time.Now())
+	if err != nil {
+		return nil, err
+	}
+
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+
+	return &User{
+		ID:        id,
+		Username:  username,
+		CreatedAt: time.Now(),
+	}, nil
 }
 
 func (a *App) authenticateUser(username, password string) (*User, error) {
-    var user User
-    row := a.DB.QueryRow(`SELECT id, username, password_hash, created_at FROM users WHERE username = ?`, username)
-    err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
-    if err != nil {
-        return nil, err
-    }
-    
-    err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
-    if err != nil {
-        return nil, err
-    }
-    
-    return &user, nil
+	var user User
+	row := a.DB.QueryRow(`SELECT id, username, password_hash, created_at FROM users WHERE username = ?`, username)
+	err := row.Scan(&user.ID, &user.Username, &user.PasswordHash, &user.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	err = bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password))
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
 }
 
 func (a *App) generateJWT(user *User) (string, error) {
-    claims := Claims{
-        UserID:   user.ID,
-        Username: user.Username,
-        RegisteredClaims: jwt.RegisteredClaims{
-            ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)), // 7 days
-            IssuedAt:  jwt.NewNumericDate(time.Now()),
-        },
-    }
-    
-    token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-    return token.SignedString(a.JWTSecret)
+	claims := Claims{
+		UserID:   user.ID,
+		Username: user.Username,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)), // 7 days
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(a.JWTSecret)
 }
 
 func (a *App) validateJWT(tokenString string) (*Claims, error) {
-    token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-        return a.JWTSecret, nil
-    })
-    
-    if err != nil {
-        return nil, err
-    }
-    
-    if claims, ok := token.Claims.(*Claims); ok && token.Valid {
-        return claims, nil
-    }
-    
-    return nil, errors.New("invalid token")
+	token, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		return a.JWTSecret, nil
+	})
+
+	if err != nil {
+		return nil, err
+	}
+
+	if claims, ok := token.Claims.(*Claims); ok && token.Valid {
+		return claims, nil
+	}
+
+	return nil, errors.New("invalid token")
 }
 
 func (a *App) requireAuth(next http.HandlerFunc) http.HandlerFunc {
-    return func(w http.ResponseWriter, r *http.Request) {
-        authHeader := r.Header.Get("Authorization")
-        if authHeader == "" {
-            http.Error(w, "unauthorized", http.StatusUnauthorized)
-            return
-        }
-        
-        tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-        if tokenString == authHeader {
-            http.Error(w, "invalid authorization header", http.StatusUnauthorized)
-            return
-        }
-        
-        _, err := a.validateJWT(tokenString)
-        if err != nil {
-            http.Error(w, "invalid token", http.StatusUnauthorized)
-            return
-        }
-        
-        next(w, r)
-    }
+	return func(w http.ResponseWriter, r *http.Request) {
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenString == authHeader {
+			http.Error(w, "invalid authorization header", http.StatusUnauthorized)
+			return
+		}
+
+		_, err := a.validateJWT(tokenString)
+		if err != nil {
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		next(w, r)
+	}
 }
 
 // helper to extract first <h1> inner text from HTML
 func extractTitleFromHTML(htmlStr string) string {
-    lower := strings.ToLower(htmlStr)
-    start := strings.Index(lower, "<h1")
-    if start == -1 {
-        return ""
-    }
-    gt := strings.Index(lower[start:], ">")
-    if gt == -1 {
-        return ""
-    }
-    gtAbs := start + gt + 1
-    endTag := strings.Index(lower[gtAbs:], "</h1>")
-    if endTag == -1 {
-        return ""
-    }
-    inner := htmlStr[gtAbs : gtAbs+endTag]
-    var b strings.Builder
-    inTag := false
-    for _, r := range inner {
-        switch r {
-        case '<':
-            inTag = true
-        case '>':
-            inTag = false
-        default:
-            if !inTag {
-                b.WriteRune(r)
-            }
-        }
-    }
-    title := strings.TrimSpace(b.String())
-    title = strings.Join(strings.Fields(title), " ")
-    return title
+	lower := strings.ToLower(htmlStr)
+	start := strings.Index(lower, "<h1")
+	if start == -1 {
+		return ""
+	}
+	gt := strings.Index(lower[start:], ">")
+	if gt == -1 {
+		return ""
+	}
+	gtAbs := start + gt + 1
+	endTag := strings.Index(lower[gtAbs:], "</h1>")
+	if endTag == -1 {
+		return ""
+	}
+	inner := htmlStr[gtAbs : gtAbs+endTag]
+	var b strings.Builder
+	inTag := false
+	for _, r := range inner {
+		switch r {
+		case '<':
+			inTag = true
+		case '>':
+			inTag = false
+		default:
+			if !inTag {
+				b.WriteRune(r)
+			}
+		}
+	}
+	title := strings.TrimSpace(b.String())
+	title = strings.Join(strings.Fields(title), " ")
+	return title
 }
 
 // extractMentionsFromHTML extracts mention links from HTML content
 // Returns a slice of target post IDs that are mentioned
 func extractMentionsFromHTML(htmlStr string) []int64 {
-    // Regex to find mention links with data-mention-id attribute (order-independent)
-    re := regexp.MustCompile(`<a[^>]*data-mention-id="(\d+)"[^>]*>`)
-    matches := re.FindAllStringSubmatch(htmlStr, -1)
-    
-    var mentionIDs []int64
-    for _, match := range matches {
-        if len(match) > 1 {
-            if id, err := strconv.ParseInt(match[1], 10, 64); err == nil {
-                mentionIDs = append(mentionIDs, id)
-            }
-        }
-    }
-    
-    return mentionIDs
+	// Regex to find mention links with data-mention-id attribute (order-independent)
+	re := regexp.MustCompile(`<a[^>]*data-mention-id="(\d+)"[^>]*>`)
+	matches := re.FindAllStringSubmatch(htmlStr, -1)
+
+	var mentionIDs []int64
+	for _, match := range matches {
+		if len(match) > 1 {
+			if id, err := strconv.ParseInt(match[1], 10, 64); err == nil {
+				mentionIDs = append(mentionIDs, id)
+			}
+		}
+	}
+
+	return mentionIDs
 }
 
 // updatePostLinks updates the bi-directional links for a post
 func (a *App) updatePostLinks(sourcePostID int64, htmlContent string) error {
-    // Extract mentions from the HTML content
-    mentionIDs := extractMentionsFromHTML(htmlContent)
-    a.Logger.Debug("updatePostLinks", "sourcePostID", sourcePostID, "mentionIDs", mentionIDs, "htmlLength", len(htmlContent))
-    
-    // Begin transaction to ensure atomicity
-    tx, err := a.DB.Begin()
-    if err != nil {
-        return fmt.Errorf("failed to begin transaction: %v", err)
-    }
-    defer tx.Rollback() // Rollback if not committed
-    
-    // Remove existing links for this source post
-    _, err = tx.Exec(`DELETE FROM post_links WHERE source_post_id = ?`, sourcePostID)
-    if err != nil {
-        return fmt.Errorf("failed to delete existing links: %v", err)
-    }
-    
-    // Add new links
-    now := time.Now()
-    for _, targetID := range mentionIDs {
-        // Don't create self-links
-        if targetID == sourcePostID {
-            continue
-        }
-        
-        // Check if target post exists
-        var exists int
-        err = tx.QueryRow(`SELECT 1 FROM posts WHERE id = ?`, targetID).Scan(&exists)
-        if err == sql.ErrNoRows {
-            // Target post doesn't exist, skip this link
-            continue
-        } else if err != nil {
-            return fmt.Errorf("failed to check target post existence: %v", err)
-        }
-        
-        // Insert the link
-        _, err = tx.Exec(`
+	// Extract mentions from the HTML content
+	mentionIDs := extractMentionsFromHTML(htmlContent)
+	a.Logger.Debug("updatePostLinks", "sourcePostID", sourcePostID, "mentionIDs", mentionIDs, "htmlLength", len(htmlContent))
+
+	// Begin transaction to ensure atomicity
+	tx, err := a.DB.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback() // Rollback if not committed
+
+	// Remove existing links for this source post
+	_, err = tx.Exec(`DELETE FROM post_links WHERE source_post_id = ?`, sourcePostID)
+	if err != nil {
+		return fmt.Errorf("failed to delete existing links: %v", err)
+	}
+
+	// Add new links
+	now := time.Now()
+	for _, targetID := range mentionIDs {
+		// Don't create self-links
+		if targetID == sourcePostID {
+			continue
+		}
+
+		// Check if target post exists
+		var exists int
+		err = tx.QueryRow(`SELECT 1 FROM posts WHERE id = ?`, targetID).Scan(&exists)
+		if err == sql.ErrNoRows {
+			// Target post doesn't exist, skip this link
+			continue
+		} else if err != nil {
+			return fmt.Errorf("failed to check target post existence: %v", err)
+		}
+
+		// Insert the link
+		_, err = tx.Exec(`
             INSERT OR IGNORE INTO post_links (source_post_id, target_post_id, created_at) 
             VALUES (?, ?, ?)
         `, sourcePostID, targetID, now)
-        if err != nil {
-            return fmt.Errorf("failed to insert link: %v", err)
-        }
-    }
-    
-    // Commit the transaction
-    if err = tx.Commit(); err != nil {
-        return fmt.Errorf("failed to commit transaction: %v", err)
-    }
-    
-    // Force WAL checkpoint to ensure data persists immediately
-    if _, err = a.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE);`); err != nil {
-        // Log error but don't fail - data is already committed
-        a.Logger.Debug("WAL checkpoint failed", "error", err.Error())
-    }
-    
-    return nil
+		if err != nil {
+			return fmt.Errorf("failed to insert link: %v", err)
+		}
+	}
+
+	// Commit the transaction
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %v", err)
+	}
+
+	// Force WAL checkpoint to ensure data persists immediately
+	if _, err = a.DB.Exec(`PRAGMA wal_checkpoint(TRUNCATE);`); err != nil {
+		// Log error but don't fail - data is already committed
+		a.Logger.Debug("WAL checkpoint failed", "error", err.Error())
+	}
+
+	return nil
 }
 
 // getPostBacklinks retrieves all posts that link to the given post
 func (a *App) getPostBacklinks(postID int64) ([]Post, error) {
-    rows, err := a.DB.Query(`
+	rows, err := a.DB.Query(`
         SELECT p.id, p.title, p.content, p.created_at, p.updated_at
         FROM posts p
         JOIN post_links pl ON p.id = pl.source_post_id
         WHERE pl.target_post_id = ?
         ORDER BY p.updated_at DESC
     `, postID)
-    if err != nil {
-        return nil, err
-    }
-    defer rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 
-    var posts []Post
-    for rows.Next() {
-        var p Post
-        err := rows.Scan(&p.ID, &p.Title, &p.Content, &p.CreatedAt, &p.UpdatedAt)
-        if err != nil {
-            return nil, err
-        }
-        posts = append(posts, p)
-    }
+	var posts []Post
+	for rows.Next() {
+		var p Post
+		err := rows.Scan(&p.ID, &p.Title, &p.Content, &p.CreatedAt, &p.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		posts = append(posts, p)
+	}
 
-    return posts, rows.Err()
+	return posts, rows.Err()
 }
 
 func (a *App) ensureUploadsDir() error {
-    uploadsDir := "uploads"
-    if _, err := os.Stat(uploadsDir); os.IsNotExist(err) {
-        return os.MkdirAll(uploadsDir, 0755)
-    }
-    return nil
+	uploadsDir := "uploads"
+	if _, err := os.Stat(uploadsDir); os.IsNotExist(err) {
+		return os.MkdirAll(uploadsDir, 0755)
+	}
+	return nil
 }
 
 func (a *App) saveAttachment(file io.Reader, originalFilename, mimeType string, size int64) (*Attachment, error) {
-    // Generate unique filename
-    ext := filepath.Ext(originalFilename)
-    filename := uuid.New().String() + ext
-    
-    // Ensure uploads directory exists
-    if err := a.ensureUploadsDir(); err != nil {
-        return nil, fmt.Errorf("failed to create uploads directory: %v", err)
-    }
-    
-    // Save file to disk
-    filepath := filepath.Join("uploads", filename)
-    outFile, err := os.Create(filepath)
-    if err != nil {
-        return nil, fmt.Errorf("failed to create file: %v", err)
-    }
-    defer outFile.Close()
-    
-    _, err = io.Copy(outFile, file)
-    if err != nil {
-        os.Remove(filepath) // Clean up on error
-        return nil, fmt.Errorf("failed to save file: %v", err)
-    }
-    
-    // Save metadata to database
-    now := time.Now()
-    result, err := a.DB.Exec(`
+	// Generate unique filename
+	ext := filepath.Ext(originalFilename)
+	filename := uuid.New().String() + ext
+
+	// Ensure uploads directory exists
+	if err := a.ensureUploadsDir(); err != nil {
+		return nil, fmt.Errorf("failed to create uploads directory: %v", err)
+	}
+
+	// Save file to disk
+	filepath := filepath.Join("uploads", filename)
+	outFile, err := os.Create(filepath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create file: %v", err)
+	}
+	defer outFile.Close()
+
+	_, err = io.Copy(outFile, file)
+	if err != nil {
+		os.Remove(filepath) // Clean up on error
+		return nil, fmt.Errorf("failed to save file: %v", err)
+	}
+
+	// Save metadata to database
+	now := time.Now()
+	result, err := a.DB.Exec(`
         INSERT INTO attachments (filename, original_name, mime_type, size, created_at) 
         VALUES (?, ?, ?, ?, ?)
     `, filename, originalFilename, mimeType, size, now)
-    if err != nil {
-        os.Remove(filepath) // Clean up on error
-        return nil, fmt.Errorf("failed to save metadata: %v", err)
-    }
-    
-    id, err := result.LastInsertId()
-    if err != nil {
-        return nil, err
-    }
-    
-    return &Attachment{
-        ID:           id,
-        Filename:     filename,
-        OriginalName: originalFilename,
-        MimeType:     mimeType,
-        Size:         size,
-        CreatedAt:    now,
-    }, nil
+	if err != nil {
+		os.Remove(filepath) // Clean up on error
+		return nil, fmt.Errorf("failed to save metadata: %v", err)
+	}
+
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+
+	return &Attachment{
+		ID:           id,
+		Filename:     filename,
+		OriginalName: originalFilename,
+		MimeType:     mimeType,
+		Size:         size,
+		CreatedAt:    now,
+	}, nil
 }
 
 func (a *App) getAttachment(filename string) (*Attachment, error) {
-    var attachment Attachment
-    row := a.DB.QueryRow(`
+	var attachment Attachment
+	row := a.DB.QueryRow(`
         SELECT id, filename, original_name, mime_type, size, created_at 
         FROM attachments WHERE filename = ?
     `, filename)
-    
-    err := row.Scan(&attachment.ID, &attachment.Filename, &attachment.OriginalName, 
-                   &attachment.MimeType, &attachment.Size, &attachment.CreatedAt)
-    if err != nil {
-        return nil, err
-    }
-    
-    return &attachment, nil
+
+	err := row.Scan(&attachment.ID, &attachment.Filename, &attachment.OriginalName,
+		&attachment.MimeType, &attachment.Size, &attachment.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	return &attachment, nil
 }
 
 func isValidImageMimeType(mimeType string) bool {
-    validTypes := []string{
-        "image/jpeg",
-        "image/jpg", 
-        "image/png",
-        "image/gif",
-        "image/webp",
-    }
-    
-    for _, validType := range validTypes {
-        if mimeType == validType {
-            return true
-        }
-    }
-    return false
+	validTypes := []string{
+		"image/jpeg",
+		"image/jpg",
+		"image/png",
+		"image/gif",
+		"image/webp",
+	}
+
+	for _, validType := range validTypes {
+		if mimeType == validType {
+			return true
+		}
+	}
+	return false
+}
+
+// corsMiddleware adds CORS headers for cross-origin requests
+func (a *App) corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Get CORS origins from environment variable, default to "*"
+		allowedOrigins := os.Getenv("CORS_ALLOWED_ORIGINS")
+		if allowedOrigins == "" {
+			allowedOrigins = "*"
+		}
+
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", allowedOrigins)
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+
+		// Handle preflight requests
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next(w, r)
+	}
 }
 
 func (a *App) routes() {
-    mux := a.Mux
-    // Health
-    mux.HandleFunc("/api/health", func(w http.ResponseWriter, r *http.Request) {
-        w.Header().Set("Content-Type", "application/json")
-        _ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
-    })
+	mux := a.Mux
+	// Health
+	mux.HandleFunc("/api/health", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
 
-    // Check if setup is needed
-    mux.HandleFunc("/api/setup/status", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodGet {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        
-        hasUsers, err := a.hasAnyUsers()
-        if err != nil {
-            http.Error(w, "database error", http.StatusInternalServerError)
-            return
-        }
-        
-        w.Header().Set("Content-Type", "application/json")
-        _ = json.NewEncoder(w).Encode(map[string]bool{
-            "needsSetup": !hasUsers,
-        })
-    })
+	// Check if setup is needed
+	mux.HandleFunc("/api/setup/status", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
-    // User registration (only allowed if no users exist)
-    mux.HandleFunc("/api/setup/register", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        
-        var payload struct {
-            Username string `json:"username"`
-            Password string `json:"password"`
-        }
-        
-        if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-            http.Error(w, "invalid json", http.StatusBadRequest)
-            return
-        }
-        
-        if payload.Username == "" || payload.Password == "" {
-            http.Error(w, "username and password are required", http.StatusBadRequest)
-            return
-        }
-        
-        if len(payload.Password) < 3 {
-            http.Error(w, "password must be at least 3 characters", http.StatusBadRequest)
-            return
-        }
-        
-        user, err := a.createUser(payload.Username, payload.Password)
-        if err != nil {
-            if err.Error() == "user registration is not allowed - user already exists" {
-                http.Error(w, "registration not allowed", http.StatusForbidden)
-            } else {
-                http.Error(w, "failed to create user", http.StatusInternalServerError)
-            }
-            return
-        }
-        
-        token, err := a.generateJWT(user)
-        if err != nil {
-            http.Error(w, "failed to generate token", http.StatusInternalServerError)
-            return
-        }
-        
-        refreshToken, err := a.createRefreshToken(user.ID)
-        if err != nil {
-            http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
-            return
-        }
-        
-        w.Header().Set("Content-Type", "application/json")
-        _ = json.NewEncoder(w).Encode(map[string]interface{}{
-            "token": token,
-            "refreshToken": refreshToken,
-            "user": map[string]interface{}{
-                "id": user.ID,
-                "username": user.Username,
-            },
-        })
-    })
+		hasUsers, err := a.hasAnyUsers()
+		if err != nil {
+			http.Error(w, "database error", http.StatusInternalServerError)
+			return
+		}
 
-    // Auth endpoints
-    mux.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        
-        var payload struct {
-            Username string `json:"username"`
-            Password string `json:"password"`
-        }
-        
-        if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-            http.Error(w, "invalid json", http.StatusBadRequest)
-            return
-        }
-        
-        user, err := a.authenticateUser(payload.Username, payload.Password)
-        if err != nil {
-            a.Logger.Info("Login attempt failed", "username", payload.Username, "error", err.Error())
-            http.Error(w, "invalid credentials", http.StatusUnauthorized)
-            return
-        }
-        
-        a.Logger.Info("User authenticated successfully", "username", user.Username, "userID", user.ID)
-        
-        token, err := a.generateJWT(user)
-        if err != nil {
-            a.Logger.Error("Failed to generate JWT token", "userID", user.ID, "error", err.Error())
-            http.Error(w, "failed to generate token", http.StatusInternalServerError)
-            return
-        }
-        
-        refreshToken, err := a.createRefreshToken(user.ID)
-        if err != nil {
-            a.Logger.Error("Failed to generate refresh token", "userID", user.ID, "error", err.Error())
-            http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
-            return
-        }
-        
-        a.Logger.Info("Login successful", "username", user.Username, "userID", user.ID)
-        
-        w.Header().Set("Content-Type", "application/json")
-        _ = json.NewEncoder(w).Encode(map[string]interface{}{
-            "token": token,
-            "refreshToken": refreshToken,
-            "user": map[string]interface{}{
-                "id": user.ID,
-                "username": user.Username,
-            },
-        })
-    })
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]bool{
+			"needsSetup": !hasUsers,
+		})
+	}))
 
-    mux.HandleFunc("/api/auth/validate", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodGet {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        
-        authHeader := r.Header.Get("Authorization")
-        if authHeader == "" {
-            http.Error(w, "unauthorized", http.StatusUnauthorized)
-            return
-        }
-        
-        tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-        if tokenString == authHeader {
-            http.Error(w, "invalid authorization header", http.StatusUnauthorized)
-            return
-        }
-        
-        claims, err := a.validateJWT(tokenString)
-        if err != nil {
-            http.Error(w, "invalid token", http.StatusUnauthorized)
-            return
-        }
-        
-        w.Header().Set("Content-Type", "application/json")
-        _ = json.NewEncoder(w).Encode(map[string]interface{}{
-            "valid": true,
-            "user": map[string]interface{}{
-                "id": claims.UserID,
-                "username": claims.Username,
-            },
-        })
-    })
+	// User registration (only allowed if no users exist)
+	mux.HandleFunc("/api/setup/register", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
-    // Token refresh endpoint
-    mux.HandleFunc("/api/auth/refresh", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        
-        var payload struct {
-            RefreshToken string `json:"refreshToken"`
-        }
-        
-        if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-            http.Error(w, "invalid json", http.StatusBadRequest)
-            return
-        }
-        
-        if payload.RefreshToken == "" {
-            http.Error(w, "refresh token required", http.StatusBadRequest)
-            return
-        }
-        
-        // Validate refresh token
-        userID, err := a.validateRefreshToken(payload.RefreshToken)
-        if err != nil {
-            http.Error(w, "invalid refresh token", http.StatusUnauthorized)
-            return
-        }
-        
-        // Get user
-        var user User
-        row := a.DB.QueryRow(`SELECT id, username, created_at FROM users WHERE id = ?`, userID)
-        err = row.Scan(&user.ID, &user.Username, &user.CreatedAt)
-        if err != nil {
-            http.Error(w, "user not found", http.StatusUnauthorized)
-            return
-        }
-        
-        // Generate new tokens
-        newToken, err := a.generateJWT(&user)
-        if err != nil {
-            http.Error(w, "failed to generate token", http.StatusInternalServerError)
-            return
-        }
-        
-        newRefreshToken, err := a.createRefreshToken(user.ID)
-        if err != nil {
-            http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
-            return
-        }
-        
-        // Revoke old refresh token
-        _ = a.revokeRefreshToken(payload.RefreshToken)
-        
-        w.Header().Set("Content-Type", "application/json")
-        _ = json.NewEncoder(w).Encode(map[string]interface{}{
-            "token": newToken,
-            "refreshToken": newRefreshToken,
-            "user": map[string]interface{}{
-                "id": user.ID,
-                "username": user.Username,
-            },
-        })
-    })
+		var payload struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
 
-    // Posts collection: POST(create) and GET(list)
-    mux.HandleFunc("/api/posts", func(w http.ResponseWriter, r *http.Request) {
-        switch r.Method {
-        case http.MethodPost:
-            // Protect post creation
-            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-                a.Logger.Debug("Creating new post")
-                now := time.Now()
-                res, err := a.DB.Exec(`INSERT INTO posts(title, content, created_at, updated_at, is_private) VALUES(NULL, '', ?, ?, ?)`, now, now, true)
-                if err != nil {
-                    a.Logger.Error("Failed to create post in database", "error", err.Error())
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                    return
-                }
-                id, _ := res.LastInsertId()
-                p := Post{ID: id, Title: nil, Content: "", CreatedAt: now, UpdatedAt: now, IsPrivate: true}
-                a.Logger.Info("Post created successfully", "postID", id, "isPrivate", p.IsPrivate)
-                
-                // Invalidate posts cache
-                a.cacheInvalidatePattern("posts_list_")
-                
-                w.Header().Set("Content-Type", "application/json")
-                w.WriteHeader(http.StatusCreated)
-                _ = json.NewEncoder(w).Encode(p)
-            })(w, r)
-            return
-        case http.MethodGet:
-            isAuth := a.isAuthenticated(r)
-            a.Logger.Debug("Fetching posts list", "authenticated", isAuth)
-            
-            posts, err := a.getPostsWithPrivacy(isAuth)
-            if err != nil {
-                a.Logger.Error("Failed to fetch posts from database", "error", err.Error())
-                http.Error(w, "db error", http.StatusInternalServerError)
-                return
-            }
-            
-            a.Logger.Debug("Posts fetched successfully", "count", len(posts), "authenticated", isAuth)
-            w.Header().Set("Content-Type", "application/json")
-            w.Header().Set("Cache-Control", "no-cache")
-            _ = json.NewEncoder(w).Encode(posts)
-            return
-        default:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-    })
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
 
-    // Individual post: GET/PUT/DELETE
-    mux.HandleFunc("/api/posts/", func(w http.ResponseWriter, r *http.Request) {
-        path := strings.TrimPrefix(r.URL.Path, "/api/posts/")
-        if path == "" {
-            http.NotFound(w, r)
-            return
-        }
-        
-        // Handle backlinks sub-path
-        if strings.HasSuffix(path, "/backlinks") {
-            if r.Method != http.MethodGet {
-                http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-                return
-            }
-            
-            idStr := strings.TrimSuffix(path, "/backlinks")
-            postID, err := strconv.ParseInt(idStr, 10, 64)
-            if err != nil {
-                http.Error(w, "invalid post ID", http.StatusBadRequest)
-                return
-            }
-            
-            // Get backlinks
-            backlinks, err := a.getPostBacklinks(postID)
-            if err != nil {
-                http.Error(w, "db error", http.StatusInternalServerError)
-                return
-            }
-            
-            w.Header().Set("Content-Type", "application/json")
-            _ = json.NewEncoder(w).Encode(backlinks)
-            return
-        }
-        
-        // Handle publish/unpublish sub-path
-        if strings.HasSuffix(path, "/publish") {
-            if r.Method != http.MethodPut {
-                http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-                return
-            }
-            
-            // Require authentication for publishing
-            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-                idStr := strings.TrimSuffix(path, "/publish")
-                
-                // Get current post to check if it exists and get current privacy state
-                p, err := a.getPost(idStr)
-                if err != nil {
-                    if errors.Is(err, sql.ErrNoRows) {
-                        http.NotFound(w, r)
-                    } else {
-                        http.Error(w, "db error", http.StatusInternalServerError)
-                    }
-                    return
-                }
-                
-                // Toggle privacy state
-                newPrivate := !p.IsPrivate
-                a.Logger.Info("Toggling post privacy", "postID", idStr, "from", p.IsPrivate, "to", newPrivate)
-                
-                _, err = a.DB.Exec(`UPDATE posts SET is_private = ? WHERE id = ?`, newPrivate, idStr)
-                if err != nil {
-                    a.Logger.Error("Failed to update post privacy in database", "postID", idStr, "error", err.Error())
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                    return
-                }
-                
-                // Get updated post
-                updatedPost, err := a.getPost(idStr)
-                if err != nil {
-                    a.Logger.Error("Failed to fetch updated post after privacy toggle", "postID", idStr, "error", err.Error())
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                    return
-                }
-                
-                a.Logger.Info("Post privacy toggled successfully", "postID", idStr, "isPrivate", updatedPost.IsPrivate)
-                
-                // Invalidate posts cache
-                a.cacheInvalidatePattern("posts_list_")
-                a.cacheDelete(fmt.Sprintf("post_%s", idStr))
-                
-                w.Header().Set("Content-Type", "application/json")
-                _ = json.NewEncoder(w).Encode(updatedPost)
-            })(w, r)
-            return
-        }
-        
-        // Regular individual post operations
-        idStr := path
-        switch r.Method {
-        case http.MethodGet:
-            p, err := a.getPost(idStr)
-            if err != nil {
-                if errors.Is(err, sql.ErrNoRows) {
-                    http.NotFound(w, r)
-                } else {
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                }
-                return
-            }
-            
-            // Check if post is private and user is not authenticated
-            isAuth := a.isAuthenticated(r)
-            if p.IsPrivate && !isAuth {
-                http.NotFound(w, r)
-                return
-            }
-            
-            w.Header().Set("Content-Type", "application/json")
-            w.Header().Set("Cache-Control", "no-cache")
-            _ = json.NewEncoder(w).Encode(p)
-            return
-        case http.MethodPut:
-            // Protect post updates
-            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-                a.Logger.Debug("Updating post", "postID", idStr)
-                var payload struct{ Content string `json:"content"` }
-                if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-                    a.Logger.Error("Invalid JSON in post update request", "postID", idStr, "error", err.Error())
-                    http.Error(w, "invalid json", http.StatusBadRequest)
-                    return
-                }
-                title := extractTitleFromHTML(payload.Content)
-                var titlePtr *string
-                if strings.TrimSpace(title) != "" {
-                    titlePtr = &title
-                }
-                now := time.Now()
-                // update
-                _, err := a.DB.Exec(`UPDATE posts SET title = ?, content = ?, updated_at = ? WHERE id = ?`, titlePtr, payload.Content, now, idStr)
-                if err != nil {
-                    a.Logger.Error("Failed to update post in database", "postID", idStr, "error", err.Error())
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                    return
-                }
-                
-                a.Logger.Info("Post updated successfully", "postID", idStr, "title", title)
-                
-                // Invalidate posts cache
-                a.cacheInvalidatePattern("posts_list_")
-                a.cacheDelete(fmt.Sprintf("post_%s", idStr))
-                
-                // Parse post ID and update bi-directional links
-                if postID, parseErr := strconv.ParseInt(idStr, 10, 64); parseErr == nil {
-                    if linkErr := a.updatePostLinks(postID, payload.Content); linkErr != nil {
-                        a.Logger.Debug("Failed to update post links", "postID", postID, "error", linkErr.Error())
-                    } else {
-                        a.Logger.Debug("Post links updated successfully", "postID", postID)
-                    }
-                }
-                
-                p, err := a.getPost(idStr)
-                if err != nil {
-                    if errors.Is(err, sql.ErrNoRows) {
-                        http.NotFound(w, r)
-                    } else {
-                        http.Error(w, "db error", http.StatusInternalServerError)
-                    }
-                    return
-                }
-                w.Header().Set("Content-Type", "application/json")
-                _ = json.NewEncoder(w).Encode(p)
-            })(w, r)
-            return
-        case http.MethodDelete:
-            // Protect post deletion
-            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-                _, err := a.DB.Exec(`DELETE FROM posts WHERE id = ?`, idStr)
-                if err != nil {
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                    return
-                }
-                
-                // Invalidate posts cache
-                a.cacheInvalidatePattern("posts_list_")
-                
-                w.WriteHeader(http.StatusNoContent)
-            })(w, r)
-            return
-        default:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-    })
+		if payload.Username == "" || payload.Password == "" {
+			http.Error(w, "username and password are required", http.StatusBadRequest)
+			return
+		}
 
-    // Settings endpoints
-    mux.HandleFunc("/api/settings", func(w http.ResponseWriter, r *http.Request) {
-        switch r.Method {
-        case http.MethodGet:
-            // Get all settings or specific setting by key query param
-            key := r.URL.Query().Get("key")
-            if key != "" {
-                // Get specific setting
-                var value string
-                err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
-                if err != nil {
-                    if errors.Is(err, sql.ErrNoRows) {
-                        w.Header().Set("Content-Type", "application/json")
-                        w.Header().Set("Cache-Control", "no-cache")
-                        _ = json.NewEncoder(w).Encode(map[string]string{"value": ""})
-                        return
-                    }
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                    return
-                }
-                
-                w.Header().Set("Content-Type", "application/json")
-                w.Header().Set("Cache-Control", "no-cache")
-                _ = json.NewEncoder(w).Encode(map[string]string{"value": value})
-                return
-            }
-            
-            // Get all settings
-            rows, err := a.DB.Query(`SELECT key, value FROM settings`)
-            if err != nil {
-                http.Error(w, "db error", http.StatusInternalServerError)
-                return
-            }
-            defer rows.Close()
-            settings := make(map[string]string)
-            for rows.Next() {
-                var k, v string
-                if err := rows.Scan(&k, &v); err != nil {
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                    return
-                }
-                settings[k] = v
-            }
-            
-            w.Header().Set("Content-Type", "application/json")
-            w.Header().Set("Cache-Control", "no-cache")
-            _ = json.NewEncoder(w).Encode(settings)
-            return
-        case http.MethodPut:
-            // Protect settings updates
-            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-                var payload struct {
-                    Key   string `json:"key"`
-                    Value string `json:"value"`
-                }
-                if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-                    http.Error(w, "invalid json", http.StatusBadRequest)
-                    return
-                }
-                if payload.Key == "" {
-                    http.Error(w, "key is required", http.StatusBadRequest)
-                    return
-                }
-                now := time.Now()
-                _, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)`, payload.Key, payload.Value, now)
-                if err != nil {
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                    return
-                }
-                
-                // Invalidate settings cache
-                a.cacheDelete("settings_all")
-                a.cacheDelete(fmt.Sprintf("setting_%s", payload.Key))
-                
-                w.Header().Set("Content-Type", "application/json")
-                _ = json.NewEncoder(w).Encode(map[string]string{"key": payload.Key, "value": payload.Value})
-            })(w, r)
-            return
-        default:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-    })
+		if len(payload.Password) < 3 {
+			http.Error(w, "password must be at least 3 characters", http.StatusBadRequest)
+			return
+		}
 
-    // Log level endpoint - special handling to reinitialize logger
-    mux.HandleFunc("/api/settings/log-level", func(w http.ResponseWriter, r *http.Request) {
-        switch r.Method {
-        case http.MethodGet:
-            logLevel := getLogLevel(a.DB)
-            w.Header().Set("Content-Type", "application/json")
-            _ = json.NewEncoder(w).Encode(map[string]string{"level": logLevel})
-            return
-        case http.MethodPut:
-            // Protect log level updates
-            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-                var payload struct {
-                    Level string `json:"level"`
-                }
-                if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-                    http.Error(w, "invalid json", http.StatusBadRequest)
-                    return
-                }
-                
-                if err := a.updateLogLevel(payload.Level); err != nil {
-                    http.Error(w, err.Error(), http.StatusBadRequest)
-                    return
-                }
-                
-                w.Header().Set("Content-Type", "application/json")
-                _ = json.NewEncoder(w).Encode(map[string]string{"level": strings.ToUpper(payload.Level)})
-            })(w, r)
-            return
-        default:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-    })
+		user, err := a.createUser(payload.Username, payload.Password)
+		if err != nil {
+			if err.Error() == "user registration is not allowed - user already exists" {
+				http.Error(w, "registration not allowed", http.StatusForbidden)
+			} else {
+				http.Error(w, "failed to create user", http.StatusInternalServerError)
+			}
+			return
+		}
 
-    // Image upload endpoint
-    mux.HandleFunc("/api/uploads", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        
-        // Protect upload endpoint
-        a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-            // Parse multipart form
-            err := r.ParseMultipartForm(10 << 20) // 10MB max
-            if err != nil {
-                http.Error(w, "failed to parse form", http.StatusBadRequest)
-                return
-            }
-            
-            file, handler, err := r.FormFile("file")
-            if err != nil {
-                http.Error(w, "no file provided", http.StatusBadRequest)
-                return
-            }
-            defer file.Close()
-            
-            // Validate mime type
-            contentType := handler.Header.Get("Content-Type")
-            if contentType == "" {
-                contentType = mime.TypeByExtension(filepath.Ext(handler.Filename))
-            }
-            
-            if !isValidImageMimeType(contentType) {
-                http.Error(w, "invalid file type - only images are allowed", http.StatusBadRequest)
-                return
-            }
-            
-            // Save attachment
-            attachment, err := a.saveAttachment(file, handler.Filename, contentType, handler.Size)
-            if err != nil {
-                http.Error(w, fmt.Sprintf("failed to save file: %v", err), http.StatusInternalServerError)
-                return
-            }
-            
-            // Return attachment info with URL
-            response := map[string]interface{}{
-                "id":           attachment.ID,
-                "filename":     attachment.Filename,
-                "originalName": attachment.OriginalName,
-                "mimeType":     attachment.MimeType,
-                "size":         attachment.Size,
-                "url":          fmt.Sprintf("/api/uploads/%s", attachment.Filename),
-                "createdAt":    attachment.CreatedAt,
-            }
-            
-            w.Header().Set("Content-Type", "application/json")
-            w.WriteHeader(http.StatusCreated)
-            _ = json.NewEncoder(w).Encode(response)
-        })(w, r)
-    })
+		token, err := a.generateJWT(user)
+		if err != nil {
+			http.Error(w, "failed to generate token", http.StatusInternalServerError)
+			return
+		}
 
-    // Serve uploaded files
-    mux.HandleFunc("/api/uploads/", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodGet {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-        
-        filename := strings.TrimPrefix(r.URL.Path, "/api/uploads/")
-        if filename == "" {
-            http.NotFound(w, r)
-            return
-        }
-        
-        // Get attachment metadata
-        attachment, err := a.getAttachment(filename)
-        if err != nil {
-            if errors.Is(err, sql.ErrNoRows) {
-                http.NotFound(w, r)
-            } else {
-                http.Error(w, "database error", http.StatusInternalServerError)
-            }
-            return
-        }
-        
-        // Serve file
-        filepath := filepath.Join("uploads", filename)
-        if _, err := os.Stat(filepath); os.IsNotExist(err) {
-            http.NotFound(w, r)
-            return
-        }
-        
-        w.Header().Set("Content-Type", attachment.MimeType)
-        w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", attachment.OriginalName))
-        http.ServeFile(w, r, filepath)
-    })
+		refreshToken, err := a.createRefreshToken(user.ID)
+		if err != nil {
+			http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
+			return
+		}
 
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":        token,
+			"refreshToken": refreshToken,
+			"user": map[string]interface{}{
+				"id":       user.ID,
+				"username": user.Username,
+			},
+		})
+	}))
 
-    // About Me endpoints
-    mux.HandleFunc("/api/about", func(w http.ResponseWriter, r *http.Request) {
-        switch r.Method {
-        case http.MethodGet:
-            // Get about me content and enabled status
-            var aboutContent, aboutEnabled string
-            
-            // Get content
-            err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = 'aboutContent'`).Scan(&aboutContent)
-            if err != nil && !errors.Is(err, sql.ErrNoRows) {
-                http.Error(w, "db error", http.StatusInternalServerError)
-                return
-            }
-            
-            // Get enabled status
-            err = a.DB.QueryRow(`SELECT value FROM settings WHERE key = 'aboutEnabled'`).Scan(&aboutEnabled)
-            if err != nil && !errors.Is(err, sql.ErrNoRows) {
-                http.Error(w, "db error", http.StatusInternalServerError)
-                return
-            }
-            
-            // Default to disabled if not set
-            if aboutEnabled == "" {
-                aboutEnabled = "false"
-            }
-            
-            w.Header().Set("Content-Type", "application/json")
-            _ = json.NewEncoder(w).Encode(map[string]interface{}{
-                "content": aboutContent,
-                "enabled": aboutEnabled == "true",
-            })
-            return
-        case http.MethodPut:
-            // Protect about me updates
-            a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-                var payload struct{ Content string `json:"content"` }
-                if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-                    http.Error(w, "invalid json", http.StatusBadRequest)
-                    return
-                }
-                
-                now := time.Now()
-                _, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('aboutContent', ?, ?)`, 
-                    payload.Content, now)
-                if err != nil {
-                    http.Error(w, "db error", http.StatusInternalServerError)
-                    return
-                }
-                
-                w.Header().Set("Content-Type", "application/json")
-                _ = json.NewEncoder(w).Encode(map[string]interface{}{
-                    "content": payload.Content,
-                })
-            })(w, r)
-            return
-        default:
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
-    })
+	// Auth endpoints
+	mux.HandleFunc("/api/auth/login", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 
-    // AI models endpoint
-    mux.HandleFunc("/api/ai/models", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodGet {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
+		var payload struct {
+			Username string `json:"username"`
+			Password string `json:"password"`
+		}
 
-        // Protect AI endpoint
-        a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-            // Get OpenAI API key from settings
-            var apiKey string
-            err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, "openai_api_key").Scan(&apiKey)
-            if err != nil {
-                if errors.Is(err, sql.ErrNoRows) {
-                    http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
-                    return
-                }
-                http.Error(w, "database error", http.StatusInternalServerError)
-                return
-            }
-            
-            if apiKey == "" {
-                http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
-                return
-            }
-            
-            // Fetch models from OpenAI API
-            models, err := a.fetchOpenAIModels(apiKey)
-            if err != nil {
-                http.Error(w, fmt.Sprintf("Failed to fetch models: %v", err), http.StatusInternalServerError)
-                return
-            }
-            
-            w.Header().Set("Content-Type", "application/json")
-            json.NewEncoder(w).Encode(map[string]interface{}{
-                "models": models,
-            })
-        })(w, r)
-    })
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
 
-    // AI editing endpoint
-    mux.HandleFunc("/api/ai/edit", func(w http.ResponseWriter, r *http.Request) {
-        if r.Method != http.MethodPost {
-            http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-            return
-        }
+		user, err := a.authenticateUser(payload.Username, payload.Password)
+		if err != nil {
+			a.Logger.Info("Login attempt failed", "username", payload.Username, "error", err.Error())
+			http.Error(w, "invalid credentials", http.StatusUnauthorized)
+			return
+		}
 
-        // Protect AI endpoint
-        a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
-            // Parse request
-            var req struct {
-                SelectedText string `json:"selectedText"`
-                UserPrompt   string `json:"userPrompt"`
-                Model        string `json:"model,omitempty"`
-            }
-            
-            if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-                http.Error(w, "invalid request", http.StatusBadRequest)
-                return
-            }
-            
-            if req.SelectedText == "" || req.UserPrompt == "" {
-                http.Error(w, "selectedText and userPrompt are required", http.StatusBadRequest)
-                return
-            }
-            
-            // Get OpenAI API key from settings
-            var apiKey string
-            err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, "openai_api_key").Scan(&apiKey)
-            if err != nil {
-                if errors.Is(err, sql.ErrNoRows) {
-                    http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
-                    return
-                }
-                http.Error(w, "database error", http.StatusInternalServerError)
-                return
-            }
-            
-            if apiKey == "" {
-                http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
-                return
-            }
-            
-            // Default to gpt-4 if no model specified
-            model := req.Model
-            if model == "" {
-                model = "gpt-4"
-            }
-            
-            // Call OpenAI API
-            response, err := a.callOpenAI(apiKey, req.SelectedText, req.UserPrompt, model)
-            if err != nil {
-                http.Error(w, fmt.Sprintf("AI processing failed: %v", err), http.StatusInternalServerError)
-                return
-            }
-            
-            w.Header().Set("Content-Type", "application/json")
-            json.NewEncoder(w).Encode(map[string]string{
-                "editedText": response,
-            })
-        })(w, r)
-    })
+		a.Logger.Info("User authenticated successfully", "username", user.Username, "userID", user.ID)
 
-    // Static files
-    mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-        p := r.URL.Path
-        if p == "/" {
-            data, err := staticFS.ReadFile("static/index.html")
-            if err != nil {
-                http.Error(w, "index not found", http.StatusNotFound)
-                return
-            }
-            
-            etag := generateETag(data)
-            setStaticCacheHeaders(w, "index.html", etag)
-            
-            // Check if client has cached version
-            if r.Header.Get("If-None-Match") == etag {
-                w.WriteHeader(http.StatusNotModified)
-                return
-            }
-            
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            w.WriteHeader(http.StatusOK)
-            _, _ = w.Write(data)
-            return
-        }
-        
-        reqPath := strings.TrimPrefix(path.Clean(p), "/")
-        fp := filepath.Join("static", reqPath)
-        data, err := staticFS.ReadFile(fp)
-        if err != nil {
-            // Fallback to index.html for SPA routing
-            index, ierr := staticFS.ReadFile("static/index.html")
-            if ierr != nil {
-                http.NotFound(w, r)
-                return
-            }
-            
-            etag := generateETag(index)
-            setStaticCacheHeaders(w, "index.html", etag)
-            
-            // Check if client has cached version
-            if r.Header.Get("If-None-Match") == etag {
-                w.WriteHeader(http.StatusNotModified)
-                return
-            }
-            
-            w.Header().Set("Content-Type", "text/html; charset=utf-8")
-            w.WriteHeader(http.StatusOK)
-            _, _ = w.Write(index)
-            return
-        }
-        
-        etag := generateETag(data)
-        setStaticCacheHeaders(w, reqPath, etag)
-        
-        // Check if client has cached version
-        if r.Header.Get("If-None-Match") == etag {
-            w.WriteHeader(http.StatusNotModified)
-            return
-        }
-        
-        if ctype := mime.TypeByExtension(filepath.Ext(fp)); ctype != "" {
-            w.Header().Set("Content-Type", ctype)
-        }
-        w.WriteHeader(http.StatusOK)
-        _, _ = w.Write(data)
-    })
+		token, err := a.generateJWT(user)
+		if err != nil {
+			a.Logger.Error("Failed to generate JWT token", "userID", user.ID, "error", err.Error())
+			http.Error(w, "failed to generate token", http.StatusInternalServerError)
+			return
+		}
+
+		refreshToken, err := a.createRefreshToken(user.ID)
+		if err != nil {
+			a.Logger.Error("Failed to generate refresh token", "userID", user.ID, "error", err.Error())
+			http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
+			return
+		}
+
+		a.Logger.Info("Login successful", "username", user.Username, "userID", user.ID)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":        token,
+			"refreshToken": refreshToken,
+			"user": map[string]interface{}{
+				"id":       user.ID,
+				"username": user.Username,
+			},
+		})
+	}))
+
+	mux.HandleFunc("/api/auth/validate", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+		if tokenString == authHeader {
+			http.Error(w, "invalid authorization header", http.StatusUnauthorized)
+			return
+		}
+
+		claims, err := a.validateJWT(tokenString)
+		if err != nil {
+			http.Error(w, "invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"valid": true,
+			"user": map[string]interface{}{
+				"id":       claims.UserID,
+				"username": claims.Username,
+			},
+		})
+	}))
+
+	// Token refresh endpoint
+	mux.HandleFunc("/api/auth/refresh", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var payload struct {
+			RefreshToken string `json:"refreshToken"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "invalid json", http.StatusBadRequest)
+			return
+		}
+
+		if payload.RefreshToken == "" {
+			http.Error(w, "refresh token required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate refresh token
+		userID, err := a.validateRefreshToken(payload.RefreshToken)
+		if err != nil {
+			http.Error(w, "invalid refresh token", http.StatusUnauthorized)
+			return
+		}
+
+		// Get user
+		var user User
+		row := a.DB.QueryRow(`SELECT id, username, created_at FROM users WHERE id = ?`, userID)
+		err = row.Scan(&user.ID, &user.Username, &user.CreatedAt)
+		if err != nil {
+			http.Error(w, "user not found", http.StatusUnauthorized)
+			return
+		}
+
+		// Generate new tokens
+		newToken, err := a.generateJWT(&user)
+		if err != nil {
+			http.Error(w, "failed to generate token", http.StatusInternalServerError)
+			return
+		}
+
+		newRefreshToken, err := a.createRefreshToken(user.ID)
+		if err != nil {
+			http.Error(w, "failed to generate refresh token", http.StatusInternalServerError)
+			return
+		}
+
+		// Revoke old refresh token
+		_ = a.revokeRefreshToken(payload.RefreshToken)
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"token":        newToken,
+			"refreshToken": newRefreshToken,
+			"user": map[string]interface{}{
+				"id":       user.ID,
+				"username": user.Username,
+			},
+		})
+	}))
+
+	// Posts collection: POST(create) and GET(list)
+	mux.HandleFunc("/api/posts", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			// Protect post creation
+			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				a.Logger.Debug("Creating new post")
+				now := time.Now()
+				res, err := a.DB.Exec(`INSERT INTO posts(title, content, created_at, updated_at, is_private) VALUES(NULL, '', ?, ?, ?)`, now, now, true)
+				if err != nil {
+					a.Logger.Error("Failed to create post in database", "error", err.Error())
+					http.Error(w, "db error", http.StatusInternalServerError)
+					return
+				}
+				id, _ := res.LastInsertId()
+				p := Post{ID: id, Title: nil, Content: "", CreatedAt: now, UpdatedAt: now, IsPrivate: true}
+				a.Logger.Info("Post created successfully", "postID", id, "isPrivate", p.IsPrivate)
+
+				// Invalidate posts cache
+				a.cacheInvalidatePattern("posts_list_")
+
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusCreated)
+				_ = json.NewEncoder(w).Encode(p)
+			})(w, r)
+			return
+		case http.MethodGet:
+			isAuth := a.isAuthenticated(r)
+			a.Logger.Debug("Fetching posts list", "authenticated", isAuth)
+
+			posts, err := a.getPostsWithPrivacy(isAuth)
+			if err != nil {
+				a.Logger.Error("Failed to fetch posts from database", "error", err.Error())
+				http.Error(w, "db error", http.StatusInternalServerError)
+				return
+			}
+
+			a.Logger.Debug("Posts fetched successfully", "count", len(posts), "authenticated", isAuth)
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-cache")
+			_ = json.NewEncoder(w).Encode(posts)
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	}))
+
+	// Individual post: GET/PUT/DELETE
+	mux.HandleFunc("/api/posts/", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		path := strings.TrimPrefix(r.URL.Path, "/api/posts/")
+		if path == "" {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Handle backlinks sub-path
+		if strings.HasSuffix(path, "/backlinks") {
+			if r.Method != http.MethodGet {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+
+			idStr := strings.TrimSuffix(path, "/backlinks")
+			postID, err := strconv.ParseInt(idStr, 10, 64)
+			if err != nil {
+				http.Error(w, "invalid post ID", http.StatusBadRequest)
+				return
+			}
+
+			// Get backlinks
+			backlinks, err := a.getPostBacklinks(postID)
+			if err != nil {
+				http.Error(w, "db error", http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(backlinks)
+			return
+		}
+
+		// Handle publish/unpublish sub-path
+		if strings.HasSuffix(path, "/publish") {
+			if r.Method != http.MethodPut {
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+
+			// Require authentication for publishing
+			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				idStr := strings.TrimSuffix(path, "/publish")
+
+				// Get current post to check if it exists and get current privacy state
+				p, err := a.getPost(idStr)
+				if err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						http.NotFound(w, r)
+					} else {
+						http.Error(w, "db error", http.StatusInternalServerError)
+					}
+					return
+				}
+
+				// Toggle privacy state
+				newPrivate := !p.IsPrivate
+				a.Logger.Info("Toggling post privacy", "postID", idStr, "from", p.IsPrivate, "to", newPrivate)
+
+				_, err = a.DB.Exec(`UPDATE posts SET is_private = ? WHERE id = ?`, newPrivate, idStr)
+				if err != nil {
+					a.Logger.Error("Failed to update post privacy in database", "postID", idStr, "error", err.Error())
+					http.Error(w, "db error", http.StatusInternalServerError)
+					return
+				}
+
+				// Get updated post
+				updatedPost, err := a.getPost(idStr)
+				if err != nil {
+					a.Logger.Error("Failed to fetch updated post after privacy toggle", "postID", idStr, "error", err.Error())
+					http.Error(w, "db error", http.StatusInternalServerError)
+					return
+				}
+
+				a.Logger.Info("Post privacy toggled successfully", "postID", idStr, "isPrivate", updatedPost.IsPrivate)
+
+				// Invalidate posts cache
+				a.cacheInvalidatePattern("posts_list_")
+				a.cacheDelete(fmt.Sprintf("post_%s", idStr))
+
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(updatedPost)
+			})(w, r)
+			return
+		}
+
+		// Regular individual post operations
+		idStr := path
+		switch r.Method {
+		case http.MethodGet:
+			p, err := a.getPost(idStr)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					http.NotFound(w, r)
+				} else {
+					http.Error(w, "db error", http.StatusInternalServerError)
+				}
+				return
+			}
+
+			// Check if post is private and user is not authenticated
+			isAuth := a.isAuthenticated(r)
+			if p.IsPrivate && !isAuth {
+				http.NotFound(w, r)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-cache")
+			_ = json.NewEncoder(w).Encode(p)
+			return
+		case http.MethodPut:
+			// Protect post updates
+			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				a.Logger.Debug("Updating post", "postID", idStr)
+				var payload struct {
+					Content string `json:"content"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					a.Logger.Error("Invalid JSON in post update request", "postID", idStr, "error", err.Error())
+					http.Error(w, "invalid json", http.StatusBadRequest)
+					return
+				}
+				title := extractTitleFromHTML(payload.Content)
+				var titlePtr *string
+				if strings.TrimSpace(title) != "" {
+					titlePtr = &title
+				}
+				now := time.Now()
+				// update
+				_, err := a.DB.Exec(`UPDATE posts SET title = ?, content = ?, updated_at = ? WHERE id = ?`, titlePtr, payload.Content, now, idStr)
+				if err != nil {
+					a.Logger.Error("Failed to update post in database", "postID", idStr, "error", err.Error())
+					http.Error(w, "db error", http.StatusInternalServerError)
+					return
+				}
+
+				a.Logger.Info("Post updated successfully", "postID", idStr, "title", title)
+
+				// Invalidate posts cache
+				a.cacheInvalidatePattern("posts_list_")
+				a.cacheDelete(fmt.Sprintf("post_%s", idStr))
+
+				// Parse post ID and update bi-directional links
+				if postID, parseErr := strconv.ParseInt(idStr, 10, 64); parseErr == nil {
+					if linkErr := a.updatePostLinks(postID, payload.Content); linkErr != nil {
+						a.Logger.Debug("Failed to update post links", "postID", postID, "error", linkErr.Error())
+					} else {
+						a.Logger.Debug("Post links updated successfully", "postID", postID)
+					}
+				}
+
+				p, err := a.getPost(idStr)
+				if err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						http.NotFound(w, r)
+					} else {
+						http.Error(w, "db error", http.StatusInternalServerError)
+					}
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(p)
+			})(w, r)
+			return
+		case http.MethodDelete:
+			// Protect post deletion
+			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				_, err := a.DB.Exec(`DELETE FROM posts WHERE id = ?`, idStr)
+				if err != nil {
+					http.Error(w, "db error", http.StatusInternalServerError)
+					return
+				}
+
+				// Invalidate posts cache
+				a.cacheInvalidatePattern("posts_list_")
+
+				w.WriteHeader(http.StatusNoContent)
+			})(w, r)
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	}))
+
+	// Settings endpoints
+	mux.HandleFunc("/api/settings", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			// Get all settings or specific setting by key query param
+			key := r.URL.Query().Get("key")
+			if key != "" {
+				// Get specific setting
+				var value string
+				err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, key).Scan(&value)
+				if err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						w.Header().Set("Content-Type", "application/json")
+						w.Header().Set("Cache-Control", "no-cache")
+						_ = json.NewEncoder(w).Encode(map[string]string{"value": ""})
+						return
+					}
+					http.Error(w, "db error", http.StatusInternalServerError)
+					return
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-cache")
+				_ = json.NewEncoder(w).Encode(map[string]string{"value": value})
+				return
+			}
+
+			// Get all settings
+			rows, err := a.DB.Query(`SELECT key, value FROM settings`)
+			if err != nil {
+				http.Error(w, "db error", http.StatusInternalServerError)
+				return
+			}
+			defer rows.Close()
+			settings := make(map[string]string)
+			for rows.Next() {
+				var k, v string
+				if err := rows.Scan(&k, &v); err != nil {
+					http.Error(w, "db error", http.StatusInternalServerError)
+					return
+				}
+				settings[k] = v
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-cache")
+			_ = json.NewEncoder(w).Encode(settings)
+			return
+		case http.MethodPut:
+			// Protect settings updates
+			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				var payload struct {
+					Key   string `json:"key"`
+					Value string `json:"value"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					http.Error(w, "invalid json", http.StatusBadRequest)
+					return
+				}
+				if payload.Key == "" {
+					http.Error(w, "key is required", http.StatusBadRequest)
+					return
+				}
+				now := time.Now()
+				_, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)`, payload.Key, payload.Value, now)
+				if err != nil {
+					http.Error(w, "db error", http.StatusInternalServerError)
+					return
+				}
+
+				// Invalidate settings cache
+				a.cacheDelete("settings_all")
+				a.cacheDelete(fmt.Sprintf("setting_%s", payload.Key))
+
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"key": payload.Key, "value": payload.Value})
+			})(w, r)
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	}))
+
+	// Log level endpoint - special handling to reinitialize logger
+	mux.HandleFunc("/api/settings/log-level", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			logLevel := getLogLevel(a.DB)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"level": logLevel})
+			return
+		case http.MethodPut:
+			// Protect log level updates
+			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				var payload struct {
+					Level string `json:"level"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					http.Error(w, "invalid json", http.StatusBadRequest)
+					return
+				}
+
+				if err := a.updateLogLevel(payload.Level); err != nil {
+					http.Error(w, err.Error(), http.StatusBadRequest)
+					return
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"level": strings.ToUpper(payload.Level)})
+			})(w, r)
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	}))
+
+	// Image upload endpoint
+	mux.HandleFunc("/api/uploads", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Protect upload endpoint
+		a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+			// Parse multipart form
+			err := r.ParseMultipartForm(10 << 20) // 10MB max
+			if err != nil {
+				http.Error(w, "failed to parse form", http.StatusBadRequest)
+				return
+			}
+
+			file, handler, err := r.FormFile("file")
+			if err != nil {
+				http.Error(w, "no file provided", http.StatusBadRequest)
+				return
+			}
+			defer file.Close()
+
+			// Validate mime type
+			contentType := handler.Header.Get("Content-Type")
+			if contentType == "" {
+				contentType = mime.TypeByExtension(filepath.Ext(handler.Filename))
+			}
+
+			if !isValidImageMimeType(contentType) {
+				http.Error(w, "invalid file type - only images are allowed", http.StatusBadRequest)
+				return
+			}
+
+			// Save attachment
+			attachment, err := a.saveAttachment(file, handler.Filename, contentType, handler.Size)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("failed to save file: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			// Return attachment info with URL
+			response := map[string]interface{}{
+				"id":           attachment.ID,
+				"filename":     attachment.Filename,
+				"originalName": attachment.OriginalName,
+				"mimeType":     attachment.MimeType,
+				"size":         attachment.Size,
+				"url":          fmt.Sprintf("/api/uploads/%s", attachment.Filename),
+				"createdAt":    attachment.CreatedAt,
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(response)
+		})(w, r)
+	}))
+
+	// Serve uploaded files
+	mux.HandleFunc("/api/uploads/", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		filename := strings.TrimPrefix(r.URL.Path, "/api/uploads/")
+		if filename == "" {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Get attachment metadata
+		attachment, err := a.getAttachment(filename)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.NotFound(w, r)
+			} else {
+				http.Error(w, "database error", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		// Serve file
+		filepath := filepath.Join("uploads", filename)
+		if _, err := os.Stat(filepath); os.IsNotExist(err) {
+			http.NotFound(w, r)
+			return
+		}
+
+		w.Header().Set("Content-Type", attachment.MimeType)
+		w.Header().Set("Content-Disposition", fmt.Sprintf("inline; filename=\"%s\"", attachment.OriginalName))
+		http.ServeFile(w, r, filepath)
+	}))
+
+	// About Me endpoints
+	mux.HandleFunc("/api/about", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			// Get about me content and enabled status
+			var aboutContent, aboutEnabled string
+
+			// Get content
+			err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = 'aboutContent'`).Scan(&aboutContent)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "db error", http.StatusInternalServerError)
+				return
+			}
+
+			// Get enabled status
+			err = a.DB.QueryRow(`SELECT value FROM settings WHERE key = 'aboutEnabled'`).Scan(&aboutEnabled)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				http.Error(w, "db error", http.StatusInternalServerError)
+				return
+			}
+
+			// Default to disabled if not set
+			if aboutEnabled == "" {
+				aboutEnabled = "false"
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"content": aboutContent,
+				"enabled": aboutEnabled == "true",
+			})
+			return
+		case http.MethodPut:
+			// Protect about me updates
+			a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+				var payload struct {
+					Content string `json:"content"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+					http.Error(w, "invalid json", http.StatusBadRequest)
+					return
+				}
+
+				now := time.Now()
+				_, err := a.DB.Exec(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('aboutContent', ?, ?)`,
+					payload.Content, now)
+				if err != nil {
+					http.Error(w, "db error", http.StatusInternalServerError)
+					return
+				}
+
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"content": payload.Content,
+				})
+			})(w, r)
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	}))
+
+	// AI models endpoint
+	mux.HandleFunc("/api/ai/models", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Protect AI endpoint
+		a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+			// Get OpenAI API key from settings
+			var apiKey string
+			err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, "openai_api_key").Scan(&apiKey)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
+					return
+				}
+				http.Error(w, "database error", http.StatusInternalServerError)
+				return
+			}
+
+			if apiKey == "" {
+				http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
+				return
+			}
+
+			// Fetch models from OpenAI API
+			models, err := a.fetchOpenAIModels(apiKey)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("Failed to fetch models: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"models": models,
+			})
+		})(w, r)
+	}))
+
+	// AI editing endpoint
+	mux.HandleFunc("/api/ai/edit", a.corsMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Protect AI endpoint
+		a.requireAuth(func(w http.ResponseWriter, r *http.Request) {
+			// Parse request
+			var req struct {
+				SelectedText string `json:"selectedText"`
+				UserPrompt   string `json:"userPrompt"`
+				Model        string `json:"model,omitempty"`
+			}
+
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "invalid request", http.StatusBadRequest)
+				return
+			}
+
+			if req.SelectedText == "" || req.UserPrompt == "" {
+				http.Error(w, "selectedText and userPrompt are required", http.StatusBadRequest)
+				return
+			}
+
+			// Get OpenAI API key from settings
+			var apiKey string
+			err := a.DB.QueryRow(`SELECT value FROM settings WHERE key = ?`, "openai_api_key").Scan(&apiKey)
+			if err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
+					return
+				}
+				http.Error(w, "database error", http.StatusInternalServerError)
+				return
+			}
+
+			if apiKey == "" {
+				http.Error(w, "OpenAI API key not configured", http.StatusBadRequest)
+				return
+			}
+
+			// Default to gpt-4 if no model specified
+			model := req.Model
+			if model == "" {
+				model = "gpt-4"
+			}
+
+			// Call OpenAI API
+			response, err := a.callOpenAI(apiKey, req.SelectedText, req.UserPrompt, model)
+			if err != nil {
+				http.Error(w, fmt.Sprintf("AI processing failed: %v", err), http.StatusInternalServerError)
+				return
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"editedText": response,
+			})
+		})(w, r)
+	}))
+
+	// Static files
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if p == "/" {
+			data, err := staticFS.ReadFile("static/index.html")
+			if err != nil {
+				http.Error(w, "index not found", http.StatusNotFound)
+				return
+			}
+
+			etag := generateETag(data)
+			setStaticCacheHeaders(w, "index.html", etag)
+
+			// Check if client has cached version
+			if r.Header.Get("If-None-Match") == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(data)
+			return
+		}
+
+		reqPath := strings.TrimPrefix(path.Clean(p), "/")
+		fp := filepath.Join("static", reqPath)
+		data, err := staticFS.ReadFile(fp)
+		if err != nil {
+			// Fallback to index.html for SPA routing
+			index, ierr := staticFS.ReadFile("static/index.html")
+			if ierr != nil {
+				http.NotFound(w, r)
+				return
+			}
+
+			etag := generateETag(index)
+			setStaticCacheHeaders(w, "index.html", etag)
+
+			// Check if client has cached version
+			if r.Header.Get("If-None-Match") == etag {
+				w.WriteHeader(http.StatusNotModified)
+				return
+			}
+
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write(index)
+			return
+		}
+
+		etag := generateETag(data)
+		setStaticCacheHeaders(w, reqPath, etag)
+
+		// Check if client has cached version
+		if r.Header.Get("If-None-Match") == etag {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+
+		if ctype := mime.TypeByExtension(filepath.Ext(fp)); ctype != "" {
+			w.Header().Set("Content-Type", ctype)
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(data)
+	})
 }
 
-
 func (a *App) isAuthenticated(r *http.Request) bool {
-    authHeader := r.Header.Get("Authorization")
-    if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-        return false
-    }
-    tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-    _, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
-        return a.JWTSecret, nil
-    })
-    return err == nil
+	authHeader := r.Header.Get("Authorization")
+	if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+		return false
+	}
+	tokenString := strings.TrimPrefix(authHeader, "Bearer ")
+	_, err := jwt.ParseWithClaims(tokenString, &Claims{}, func(token *jwt.Token) (interface{}, error) {
+		return a.JWTSecret, nil
+	})
+	return err == nil
 }
 
 func (a *App) getPost(idStr string) (Post, error) {
-    var p Post
-    var title sql.NullString
-    row := a.DB.QueryRow(`SELECT id, title, content, created_at, updated_at, is_private FROM posts WHERE id = ?`, idStr)
-    err := row.Scan(&p.ID, &title, &p.Content, &p.CreatedAt, &p.UpdatedAt, &p.IsPrivate)
-    if err != nil {
-        return Post{}, err
-    }
-    if title.Valid {
-        t := title.String
-        p.Title = &t
-    }
-    return p, nil
+	var p Post
+	var title sql.NullString
+	row := a.DB.QueryRow(`SELECT id, title, content, created_at, updated_at, is_private FROM posts WHERE id = ?`, idStr)
+	err := row.Scan(&p.ID, &title, &p.Content, &p.CreatedAt, &p.UpdatedAt, &p.IsPrivate)
+	if err != nil {
+		return Post{}, err
+	}
+	if title.Valid {
+		t := title.String
+		p.Title = &t
+	}
+	return p, nil
 }
 
 func (a *App) getPostsWithPrivacy(isAuthenticated bool) ([]Post, error) {
-    var query string
-    if isAuthenticated {
-        query = `SELECT id, title, content, created_at, updated_at, is_private FROM posts ORDER BY updated_at DESC, created_at DESC`
-    } else {
-        query = `SELECT id, title, content, created_at, updated_at, is_private FROM posts WHERE is_private = 0 ORDER BY updated_at DESC, created_at DESC`
-    }
-    
-    rows, err := a.DB.Query(query)
-    if err != nil {
-        return nil, err
-    }
-    defer rows.Close()
-    
-    var posts []Post
-    for rows.Next() {
-        var p Post
-        var title sql.NullString
-        if err := rows.Scan(&p.ID, &title, &p.Content, &p.CreatedAt, &p.UpdatedAt, &p.IsPrivate); err != nil {
-            return nil, err
-        }
-        if title.Valid {
-            t := title.String
-            p.Title = &t
-        }
-        posts = append(posts, p)
-    }
-    return posts, nil
+	var query string
+	if isAuthenticated {
+		query = `SELECT id, title, content, created_at, updated_at, is_private FROM posts ORDER BY updated_at DESC, created_at DESC`
+	} else {
+		query = `SELECT id, title, content, created_at, updated_at, is_private FROM posts WHERE is_private = 0 ORDER BY updated_at DESC, created_at DESC`
+	}
+
+	rows, err := a.DB.Query(query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var posts []Post
+	for rows.Next() {
+		var p Post
+		var title sql.NullString
+		if err := rows.Scan(&p.ID, &title, &p.Content, &p.CreatedAt, &p.UpdatedAt, &p.IsPrivate); err != nil {
+			return nil, err
+		}
+		if title.Valid {
+			t := title.String
+			p.Title = &t
+		}
+		posts = append(posts, p)
+	}
+	return posts, nil
 }
 
 // fetchOpenAIModels fetches available models from OpenAI API
 func (a *App) fetchOpenAIModels(apiKey string) ([]map[string]interface{}, error) {
-    // Create HTTP request
-    req, err := http.NewRequest("GET", "https://api.openai.com/v1/models", nil)
-    if err != nil {
-        return nil, fmt.Errorf("failed to create request: %w", err)
-    }
-    
-    req.Header.Set("Authorization", "Bearer "+apiKey)
-    
-    // Make the request
-    client := &http.Client{Timeout: 10 * time.Second}
-    resp, err := client.Do(req)
-    if err != nil {
-        return nil, fmt.Errorf("request failed: %w", err)
-    }
-    defer resp.Body.Close()
-    
-    if resp.StatusCode != http.StatusOK {
-        body, _ := io.ReadAll(resp.Body)
-        return nil, fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
-    }
-    
-    // Parse response
-    var response struct {
-        Data []map[string]interface{} `json:"data"`
-    }
-    
-    if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-        return nil, fmt.Errorf("failed to decode response: %w", err)
-    }
-    
-    // Filter for chat completion models and sort by relevance
-    var chatModels []map[string]interface{}
-    for _, model := range response.Data {
-        if id, ok := model["id"].(string); ok {
-            // Include GPT models and other chat completion models
-            if strings.HasPrefix(id, "gpt-") || strings.Contains(id, "chat") {
-                chatModels = append(chatModels, model)
-            }
-        }
-    }
-    
-    return chatModels, nil
+	// Create HTTP request
+	req, err := http.NewRequest("GET", "https://api.openai.com/v1/models", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	// Make the request
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var response struct {
+		Data []map[string]interface{} `json:"data"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	// Filter for chat completion models and sort by relevance
+	var chatModels []map[string]interface{}
+	for _, model := range response.Data {
+		if id, ok := model["id"].(string); ok {
+			// Include GPT models and other chat completion models
+			if strings.HasPrefix(id, "gpt-") || strings.Contains(id, "chat") {
+				chatModels = append(chatModels, model)
+			}
+		}
+	}
+
+	return chatModels, nil
 }
 
 // callOpenAI makes a request to OpenAI's API for text editing
 func (a *App) callOpenAI(apiKey, selectedText, userPrompt, model string) (string, error) {
-    // System prompt designed to return clean markdown without code fences
-    systemPrompt := `You are a professional text editor. Your task is to improve the provided text according to the user's instructions.
+	// System prompt designed to return clean markdown without code fences
+	systemPrompt := `You are a professional text editor. Your task is to improve the provided text according to the user's instructions.
 
 IMPORTANT RULES:
 - Return ONLY the improved text in markdown format
@@ -1877,64 +1860,64 @@ IMPORTANT RULES:
 - Preserve the original meaning while applying the requested changes
 - Ensure the output is clean, well-formatted markdown`
 
-    // Prepare the request payload for OpenAI API
-    payload := map[string]interface{}{
-        "model": model,
-        "messages": []map[string]string{
-            {
-                "role":    "system",
-                "content": systemPrompt,
-            },
-            {
-                "role":    "user", 
-                "content": fmt.Sprintf("Original text:\n%s\n\nUser instruction: %s", selectedText, userPrompt),
-            },
-        },
-    }
-    
-    payloadBytes, err := json.Marshal(payload)
-    if err != nil {
-        return "", fmt.Errorf("failed to marshal request: %w", err)
-    }
-    
-    // Create HTTP request
-    req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(payloadBytes))
-    if err != nil {
-        return "", fmt.Errorf("failed to create request: %w", err)
-    }
-    
-    req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("Authorization", "Bearer "+apiKey)
-    
-    // Make the request
-    client := &http.Client{Timeout: 30 * time.Second}
-    resp, err := client.Do(req)
-    if err != nil {
-        return "", fmt.Errorf("request failed: %w", err)
-    }
-    defer resp.Body.Close()
-    
-    if resp.StatusCode != http.StatusOK {
-        body, _ := io.ReadAll(resp.Body)
-        return "", fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
-    }
-    
-    // Parse response
-    var response struct {
-        Choices []struct {
-            Message struct {
-                Content string `json:"content"`
-            } `json:"message"`
-        } `json:"choices"`
-    }
-    
-    if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-        return "", fmt.Errorf("failed to decode response: %w", err)
-    }
-    
-    if len(response.Choices) == 0 {
-        return "", fmt.Errorf("no response from OpenAI")
-    }
-    
-    return strings.TrimSpace(response.Choices[0].Message.Content), nil
+	// Prepare the request payload for OpenAI API
+	payload := map[string]interface{}{
+		"model": model,
+		"messages": []map[string]string{
+			{
+				"role":    "system",
+				"content": systemPrompt,
+			},
+			{
+				"role":    "user",
+				"content": fmt.Sprintf("Original text:\n%s\n\nUser instruction: %s", selectedText, userPrompt),
+			},
+		},
+	}
+
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal request: %w", err)
+	}
+
+	// Create HTTP request
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(payloadBytes))
+	if err != nil {
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+
+	// Make the request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("OpenAI API error (status %d): %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var response struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+		return "", fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(response.Choices) == 0 {
+		return "", fmt.Errorf("no response from OpenAI")
+	}
+
+	return strings.TrimSpace(response.Choices[0].Message.Content), nil
 }
