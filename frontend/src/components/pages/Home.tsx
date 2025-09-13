@@ -116,20 +116,15 @@ export const Home = memo(function Home() {
 				aboutEnabled={settings.aboutEnabled}
 			/>
 			<div className="home-content">
-				<div style={{ display: "flex", alignItems: "flex-start", gap: "12px", marginBottom: "48px" }}>
+				<div className="hero-section">
 					{settings.heroImage && (
 						<img
 							src={settings.heroImage}
 							alt="Hero image"
-							style={{
-								width: "150px",
-								height: "auto",
-								borderRadius: "6px",
-								flexShrink: 0,
-							}}
+							className="hero-image"
 						/>
 					)}
-					<p className="intro-text" style={{ margin: 0, flex: 1 }}>
+					<p className="intro-text">
 						{settings.introText && settings.introText.trim()
 							? settings.introText
 							: "A text‑only blog about design, systems, and quiet craft."}
