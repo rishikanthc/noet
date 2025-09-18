@@ -31,6 +31,7 @@ import (
 )
 
 //go:embed static/*
+//go:embed static/assets/*
 var staticFS embed.FS
 
 // CacheItem represents a cached item with expiration

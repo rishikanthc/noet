@@ -144,10 +144,11 @@ a::selection {
 .post-title {
   font-weight: 400;
   font-size: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
   letter-spacing: -0.01em;
+  line-height: 1.3;
 }
 
 .post-meta {

@@ -1,11 +1,17 @@
 # Build stage for frontend
-FROM node:18-alpine AS frontend-builder
+FROM node:22-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 
 # Copy frontend package files
 COPY frontend/package*.json ./
-RUN npm ci --only=production
+
+# Install dependencies with platform-specific fixes
+# Force npm to install all platform dependencies and clear cache to avoid issues
+RUN npm ci --no-optional && \
+    npm install --platform=linux --arch=x64 @rollup/rollup-linux-x64-musl || true && \
+    npm install --platform=linux --arch=arm64 @rollup/rollup-linux-arm64-musl || true && \
+    npm cache clean --force
 
 # Copy frontend source and build
 COPY frontend/ ./
@@ -26,7 +32,10 @@ RUN go mod download
 # Copy backend source
 COPY backend/ ./
 
-# Build the Go binary
+# Copy frontend build output to backend/static for embedding
+COPY --from=frontend-builder /app/backend/static ./static
+
+# Build the Go binary with embedded static files
 RUN CGO_ENABLED=1 GOOS=linux go build -ldflags="-s -w" -o noet .
 
 # Final runtime image

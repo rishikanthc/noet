@@ -185,17 +185,112 @@ async function deletePost(id: string, token: string): Promise<void> {
 
 // Toggle post privacy
 async function togglePostPrivacy(id: string, token: string): Promise<Note> {
-  const response = await fetch(`/api/posts/${id}/publish`, {
+  console.log('🚀 togglePostPrivacy: Starting privacy toggle for post', id);
+  console.log('🚀 togglePostPrivacy: Token present:', !!token);
+  console.log('🚀 togglePostPrivacy: User Agent:', navigator.userAgent);
+
+  // Firefox CORS fix: Add Content-Type and empty JSON body for consistent CORS handling
+  // This ensures Firefox treats this the same as other working endpoints like createPost
+  // which also send JSON bodies and work properly in production
+
+  const fetchOptions = {
     method: 'PUT',
-    headers: { Authorization: `Bearer ${token}` },
-    cache: 'no-cache'
-  });
-  
-  if (!response.ok) {
-    throw new Error(`Failed to toggle post privacy: ${response.status}`);
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json'
+    },
+    body: '{}', // Empty JSON body for consistent CORS handling
+    cache: 'no-cache' as RequestCache
+  };
+
+  console.log('🚀 togglePostPrivacy: Fetch options:', JSON.stringify(fetchOptions, null, 2));
+  console.log('🚀 togglePostPrivacy: About to call fetch...');
+
+  let response: Response;
+  try {
+    response = await fetch(`/api/posts/${id}/publish`, fetchOptions);
+    console.log('🚀 togglePostPrivacy: Fetch completed successfully');
+    console.log('🚀 togglePostPrivacy: Response status:', response.status);
+    console.log('🚀 togglePostPrivacy: Response ok:', response.ok);
+    console.log('🚀 togglePostPrivacy: Response headers:', Object.fromEntries(response.headers.entries()));
+  } catch (fetchError) {
+    console.error('🔥 togglePostPrivacy: Fetch failed with error:', {
+      error: fetchError,
+      errorName: fetchError instanceof Error ? fetchError.name : 'Unknown',
+      errorMessage: fetchError instanceof Error ? fetchError.message : 'Unknown error',
+      errorStack: fetchError instanceof Error ? fetchError.stack : 'No stack',
+      userAgent: navigator.userAgent,
+      currentUrl: window.location.href,
+      postId: id
+    });
+    throw fetchError;
   }
-  
-  return response.json();
+
+  // Clone response for error handling to avoid double-read issues in Firefox
+  console.log('🚀 togglePostPrivacy: Cloning response for Firefox compatibility');
+  const responseClone = response.clone();
+  console.log('🚀 togglePostPrivacy: Response cloned successfully');
+
+  if (!response.ok) {
+    console.error('🔥 togglePostPrivacy: Response not OK, handling error');
+    console.log('🚀 togglePostPrivacy: Reading error text from cloned response...');
+
+    let errorText: string;
+    try {
+      errorText = await responseClone.text();
+      console.log('🚀 togglePostPrivacy: Error text read successfully:', errorText);
+    } catch (textError) {
+      console.error('🔥 togglePostPrivacy: Failed to read error text:', textError);
+      errorText = 'Unknown error';
+    }
+
+    const errorDetails = {
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      body: errorText,
+      userAgent: navigator.userAgent,
+      postId: id
+    };
+
+    console.error('🔥 togglePostPrivacy: Complete error details:', errorDetails);
+    throw new Error(`Failed to toggle post privacy: ${response.status} - ${errorText}`);
+  }
+
+  console.log('🚀 togglePostPrivacy: Response OK, parsing JSON...');
+
+  try {
+    console.log('🚀 togglePostPrivacy: About to call responseClone.json()...');
+    const result = await responseClone.json();
+    console.log('🚀 togglePostPrivacy: JSON parsed successfully:', result);
+    console.log('🚀 togglePostPrivacy: Privacy toggle completed successfully!');
+    return result;
+  } catch (parseError) {
+    console.error('🔥 togglePostPrivacy: JSON parsing failed:', {
+      parseError,
+      errorName: parseError instanceof Error ? parseError.name : 'Unknown',
+      errorMessage: parseError instanceof Error ? parseError.message : 'Unknown parsing error',
+      errorStack: parseError instanceof Error ? parseError.stack : 'No stack',
+      status: response.status,
+      statusText: response.statusText,
+      headers: Object.fromEntries(response.headers.entries()),
+      responseType: response.headers.get('content-type'),
+      userAgent: navigator.userAgent,
+      postId: id
+    });
+
+    // Use a fresh clone to get raw text for debugging (Firefox-safe)
+    console.log('🚀 togglePostPrivacy: Attempting to read raw response text for debugging...');
+    try {
+      const debugResponse = response.clone();
+      const rawText = await debugResponse.text();
+      console.error('🔥 togglePostPrivacy: Raw response body:', rawText);
+    } catch (debugError) {
+      console.error('🔥 togglePostPrivacy: Could not read raw response text:', debugError);
+    }
+
+    throw new Error(`Failed to parse toggle privacy response: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`);
+  }
 }
 
 // Hook to fetch all posts
