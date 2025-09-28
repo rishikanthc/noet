@@ -20,6 +20,7 @@ export type AuthContextType = {
 	logout: () => void;
 	isAuthenticated: boolean;
 	refreshToken: () => Promise<boolean>;
+	isLoading: boolean;
 };
 
 export type ContextMenuState = {

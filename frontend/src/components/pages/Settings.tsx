@@ -242,6 +242,7 @@ export function Settings() {
 					isAuthenticated={false}
 					onLogout={logout}
 					onSettings={() => {}}
+					aboutEnabled={aboutEnabled}
 				/>
 				<div className="app-container settings-page">
 					<main
@@ -265,6 +266,7 @@ export function Settings() {
 					isAuthenticated={isAuthenticated}
 					onLogout={logout}
 					onSettings={() => {}}
+					aboutEnabled={aboutEnabled}
 				/>
 				<div className="app-container settings-page">
 					<main
@@ -284,6 +286,7 @@ export function Settings() {
 				isAuthenticated={isAuthenticated}
 				onLogout={logout}
 				onSettings={() => {}}
+				aboutEnabled={aboutEnabled}
 			/>
 			<div className="app-container settings-page">
 				<main style={{ maxWidth: 800, margin: "0 auto", padding: "32px 24px" }}>

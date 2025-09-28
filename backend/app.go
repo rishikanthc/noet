@@ -163,6 +163,13 @@ func NewApp(dbPath string) (*App, error) {
 	}
 
 	a.Logger.Info("Application initialized successfully", "dbPath", dbPath)
+
+	// Run migration to fix existing mentions
+	if err := a.fixExistingMentions(); err != nil {
+		a.Logger.Error("Failed to fix existing mentions", "error", err)
+		// Don't fail app startup, just log the error
+	}
+
 	a.routes()
 	return a, nil
 }
@@ -243,6 +250,106 @@ func runMigrations(db *sql.DB) error {
 			return fmt.Errorf("failed to add is_private column: %v", err)
 		}
 	}
+
+	// Populate post_links for existing posts that don't have links
+	if err := populateExistingPostLinks(db); err != nil {
+		return fmt.Errorf("failed to populate existing post links: %v", err)
+	}
+
+	return nil
+}
+
+// populateExistingPostLinks scans all posts and populates the post_links table
+// for posts that don't already have links. This is safe to run multiple times.
+func populateExistingPostLinks(db *sql.DB) error {
+	// Get all posts that might have mentions but no links in post_links table
+	// Look for posts with either data-mention-id or class="mention"
+	rows, err := db.Query(`
+		SELECT p.id, p.content
+		FROM posts p
+		WHERE p.content IS NOT NULL
+		AND p.content != ''
+		AND (p.content LIKE '%data-mention-id%' OR p.content LIKE '%class="mention"%')
+		AND NOT EXISTS (
+			SELECT 1 FROM post_links pl WHERE pl.source_post_id = p.id
+		)
+	`)
+	if err != nil {
+		return fmt.Errorf("failed to query posts for link population: %v", err)
+	}
+	defer rows.Close()
+
+	processed := 0
+	for rows.Next() {
+		var postID int64
+		var content string
+		if err := rows.Scan(&postID, &content); err != nil {
+			return fmt.Errorf("failed to scan post for link population: %v", err)
+		}
+
+		// Extract mentions from this post's content
+		mentionIDs := extractMentionsFromHTML(content)
+		if len(mentionIDs) == 0 {
+			continue // No mentions found
+		}
+
+		// Begin transaction for this post's links
+		tx, err := db.Begin()
+		if err != nil {
+			return fmt.Errorf("failed to begin transaction for post %d: %v", postID, err)
+		}
+
+		// Add links for this post
+		now := time.Now()
+		linkCount := 0
+		for _, targetID := range mentionIDs {
+			// Don't create self-links
+			if targetID == postID {
+				continue
+			}
+
+			// Check if target post exists
+			var exists int
+			err = tx.QueryRow(`SELECT 1 FROM posts WHERE id = ?`, targetID).Scan(&exists)
+			if err == sql.ErrNoRows {
+				continue // Target post doesn't exist
+			} else if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to check target post existence for post %d: %v", postID, err)
+			}
+
+			// Insert the link (use INSERT OR IGNORE for safety)
+			_, err = tx.Exec(`
+				INSERT OR IGNORE INTO post_links (source_post_id, target_post_id, created_at)
+				VALUES (?, ?, ?)
+			`, postID, targetID, now)
+			if err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to insert link for post %d: %v", postID, err)
+			}
+			linkCount++
+		}
+
+		// Commit the transaction
+		if err = tx.Commit(); err != nil {
+			return fmt.Errorf("failed to commit links for post %d: %v", postID, err)
+		}
+
+		processed++
+		if linkCount > 0 {
+			// Use basic logging since we don't have access to the App logger here
+			fmt.Printf("Populated %d links for post %d during migration\n", linkCount, postID)
+		}
+	}
+
+	if err = rows.Err(); err != nil {
+		return fmt.Errorf("error iterating posts for link population: %v", err)
+	}
+
+	if processed > 0 {
+		fmt.Printf("Migration: Populated links for %d posts\n", processed)
+	}
+
 	return nil
 }
 
@@ -606,20 +713,136 @@ func extractTitleFromHTML(htmlStr string) string {
 // extractMentionsFromHTML extracts mention links from HTML content
 // Returns a slice of target post IDs that are mentioned
 func extractMentionsFromHTML(htmlStr string) []int64 {
-	// Regex to find mention links with data-mention-id attribute (order-independent)
-	re := regexp.MustCompile(`<a[^>]*data-mention-id="(\d+)"[^>]*>`)
-	matches := re.FindAllStringSubmatch(htmlStr, -1)
-
 	var mentionIDs []int64
-	for _, match := range matches {
+	seen := make(map[int64]bool) // Prevent duplicates
+
+	// First try: Find mention links with data-mention-id attribute
+	re1 := regexp.MustCompile(`<a[^>]*data-mention-id="(\d+)"[^>]*>`)
+	matches1 := re1.FindAllStringSubmatch(htmlStr, -1)
+	for _, match := range matches1 {
 		if len(match) > 1 {
-			if id, err := strconv.ParseInt(match[1], 10, 64); err == nil {
+			if id, err := strconv.ParseInt(match[1], 10, 64); err == nil && !seen[id] {
 				mentionIDs = append(mentionIDs, id)
+				seen[id] = true
+			}
+		}
+	}
+
+	// Fallback: Find mention links with class="mention" and href="/posts/X"
+	re2 := regexp.MustCompile(`<a[^>]*class="[^"]*mention[^"]*"[^>]*href="/posts/(\d+)"[^>]*>`)
+	matches2 := re2.FindAllStringSubmatch(htmlStr, -1)
+	for _, match := range matches2 {
+		if len(match) > 1 {
+			if id, err := strconv.ParseInt(match[1], 10, 64); err == nil && !seen[id] {
+				mentionIDs = append(mentionIDs, id)
+				seen[id] = true
+			}
+		}
+	}
+
+	// Alternative fallback: href="/posts/X" first, then class="mention"
+	re3 := regexp.MustCompile(`<a[^>]*href="/posts/(\d+)"[^>]*class="[^"]*mention[^"]*"[^>]*>`)
+	matches3 := re3.FindAllStringSubmatch(htmlStr, -1)
+	for _, match := range matches3 {
+		if len(match) > 1 {
+			if id, err := strconv.ParseInt(match[1], 10, 64); err == nil && !seen[id] {
+				mentionIDs = append(mentionIDs, id)
+				seen[id] = true
 			}
 		}
 	}
 
 	return mentionIDs
+}
+
+// fixExistingMentions updates existing mentions in posts to include data-mention-id attributes
+func (a *App) fixExistingMentions() error {
+	a.Logger.Info("Starting migration to fix existing mentions")
+
+	// Get all posts with content
+	rows, err := a.DB.Query(`SELECT id, content FROM posts WHERE content != '' AND content IS NOT NULL`)
+	if err != nil {
+		return fmt.Errorf("failed to query posts: %v", err)
+	}
+	defer rows.Close()
+
+	var postsUpdated int
+	for rows.Next() {
+		var postID int64
+		var content string
+		if err := rows.Scan(&postID, &content); err != nil {
+			a.Logger.Error("Failed to scan post row", "error", err)
+			continue
+		}
+
+		// Find mentions without data-mention-id but with class="mention" and href="/posts/X"
+		re := regexp.MustCompile(`<a([^>]*class="[^"]*mention[^"]*"[^>]*href="/posts/(\d+)"[^>]*)>`)
+		newContent := re.ReplaceAllStringFunc(content, func(match string) string {
+			// Check if it already has data-mention-id
+			if strings.Contains(match, "data-mention-id=") {
+				return match // Already has the attribute
+			}
+
+			// Extract the post ID from href
+			idRe := regexp.MustCompile(`href="/posts/(\d+)"`)
+			idMatch := idRe.FindStringSubmatch(match)
+			if len(idMatch) < 2 {
+				return match // Can't extract ID
+			}
+
+			// Insert data-mention-id attribute before the closing >
+			insertPoint := strings.LastIndex(match, ">")
+			if insertPoint == -1 {
+				return match
+			}
+
+			return match[:insertPoint] + ` data-mention-id="` + idMatch[1] + `"` + match[insertPoint:]
+		})
+
+		// Also handle the reverse order: href first, then class
+		re2 := regexp.MustCompile(`<a([^>]*href="/posts/(\d+)"[^>]*class="[^"]*mention[^"]*"[^>]*)>`)
+		newContent = re2.ReplaceAllStringFunc(newContent, func(match string) string {
+			// Check if it already has data-mention-id
+			if strings.Contains(match, "data-mention-id=") {
+				return match // Already has the attribute
+			}
+
+			// Extract the post ID from href
+			idRe := regexp.MustCompile(`href="/posts/(\d+)"`)
+			idMatch := idRe.FindStringSubmatch(match)
+			if len(idMatch) < 2 {
+				return match // Can't extract ID
+			}
+
+			// Insert data-mention-id attribute before the closing >
+			insertPoint := strings.LastIndex(match, ">")
+			if insertPoint == -1 {
+				return match
+			}
+
+			return match[:insertPoint] + ` data-mention-id="` + idMatch[1] + `"` + match[insertPoint:]
+		})
+
+		// Update post if content changed
+		if newContent != content {
+			_, err := a.DB.Exec(`UPDATE posts SET content = ? WHERE id = ?`, newContent, postID)
+			if err != nil {
+				a.Logger.Error("Failed to update post content", "postID", postID, "error", err)
+				continue
+			}
+
+			// Update post links for this post
+			if err := a.updatePostLinks(postID, newContent); err != nil {
+				a.Logger.Error("Failed to update post links after content fix", "postID", postID, "error", err)
+			}
+
+			postsUpdated++
+			a.Logger.Debug("Fixed mentions in post", "postID", postID)
+		}
+	}
+
+	a.Logger.Info("Completed mention migration", "postsUpdated", postsUpdated)
+	return nil
 }
 
 // updatePostLinks updates the bi-directional links for a post
@@ -685,6 +908,8 @@ func (a *App) updatePostLinks(sourcePostID int64, htmlContent string) error {
 
 // getPostBacklinks retrieves all posts that link to the given post
 func (a *App) getPostBacklinks(postID int64) ([]Post, error) {
+	a.Logger.Debug("getPostBacklinks", "postID", postID)
+
 	rows, err := a.DB.Query(`
         SELECT p.id, p.title, p.content, p.created_at, p.updated_at
         FROM posts p
@@ -693,6 +918,7 @@ func (a *App) getPostBacklinks(postID int64) ([]Post, error) {
         ORDER BY p.updated_at DESC
     `, postID)
 	if err != nil {
+		a.Logger.Error("Failed to query backlinks", "postID", postID, "error", err)
 		return nil, err
 	}
 	defer rows.Close()
@@ -702,11 +928,13 @@ func (a *App) getPostBacklinks(postID int64) ([]Post, error) {
 		var p Post
 		err := rows.Scan(&p.ID, &p.Title, &p.Content, &p.CreatedAt, &p.UpdatedAt)
 		if err != nil {
+			a.Logger.Error("Failed to scan backlink row", "postID", postID, "error", err)
 			return nil, err
 		}
 		posts = append(posts, p)
 	}
 
+	a.Logger.Debug("getPostBacklinks completed", "postID", postID, "backlinksCount", len(posts))
 	return posts, rows.Err()
 }
 
@@ -1142,6 +1370,9 @@ func (a *App) routes() {
 			}
 
 			w.Header().Set("Content-Type", "application/json")
+			if backlinks == nil {
+				backlinks = []Post{}
+			}
 			_ = json.NewEncoder(w).Encode(backlinks)
 			return
 		}
@@ -1758,17 +1989,20 @@ func (a *App) isAuthenticated(r *http.Request) bool {
 }
 
 func (a *App) getPost(idStr string) (Post, error) {
+	a.Logger.Debug("getPost", "idStr", idStr)
 	var p Post
 	var title sql.NullString
 	row := a.DB.QueryRow(`SELECT id, title, content, created_at, updated_at, is_private FROM posts WHERE id = ?`, idStr)
 	err := row.Scan(&p.ID, &title, &p.Content, &p.CreatedAt, &p.UpdatedAt, &p.IsPrivate)
 	if err != nil {
+		a.Logger.Error("getPost failed", "idStr", idStr, "error", err)
 		return Post{}, err
 	}
 	if title.Valid {
 		t := title.String
 		p.Title = &t
 	}
+	a.Logger.Debug("getPost success", "idStr", idStr, "postID", p.ID)
 	return p, nil
 }
 

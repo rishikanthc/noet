@@ -19,7 +19,7 @@ interface PostEditorProps {
 }
 
 export function PostEditor({ id }: PostEditorProps) {
-	const { isAuthenticated, token, logout } = useAuth();
+	const { isAuthenticated, token, logout, isLoading: authLoading } = useAuth();
 	const { settings } = useSettings();
 	const updatePostMutation = useUpdatePost();
 	const [content, setContent] = useState<string>("");
@@ -35,18 +35,23 @@ export function PostEditor({ id }: PostEditorProps) {
 	const initialContentRef = useRef<string>("");
 
 	const loadBacklinks = useCallback(async () => {
+		console.log(`[PostEditor] Loading backlinks for post ${id}`);
 		setBacklinksLoading(true);
 		try {
 			const res = await fetch(`/api/posts/${id}/backlinks`, {
 				headers: token ? { Authorization: `Bearer ${token}` } : {}
 			});
+			console.log(`[PostEditor] Backlinks response status: ${res.status}`);
 			if (res.ok) {
 				const backlinksData: Note[] = await res.json();
-				setBacklinks(backlinksData);
+				console.log(`[PostEditor] Backlinks data:`, backlinksData);
+				setBacklinks(backlinksData || []);
 			} else {
+				console.log(`[PostEditor] Backlinks request failed with status: ${res.status}`);
 				setBacklinks([]);
 			}
 		} catch (e) {
+			console.error(`[PostEditor] Error loading backlinks:`, e);
 			setBacklinks([]);
 		} finally {
 			setBacklinksLoading(false);
@@ -99,7 +104,12 @@ export function PostEditor({ id }: PostEditorProps) {
 
 	useEffect(() => {
 		let cancelled = false;
-		
+
+		// Don't load anything if auth is still loading
+		if (authLoading) {
+			return;
+		}
+
 		// Reset initial load state when switching posts
 		setIsInitialLoad(true);
 
@@ -164,7 +174,15 @@ export function PostEditor({ id }: PostEditorProps) {
 		return () => {
 			cancelled = true;
 		};
-	}, [id, token, loadBacklinks]);
+	}, [id, token, authLoading, loadBacklinks]);
+
+	if (authLoading) {
+		return (
+			<div className="app-container">
+				<div>Loading...</div>
+			</div>
+		);
+	}
 
 	if (error)
 		return (
@@ -182,6 +200,7 @@ export function PostEditor({ id }: PostEditorProps) {
 				onSettings={() => navigateTo("/settings")}
 				onNewPost={handleNewPost}
 				creating={creating}
+				aboutEnabled={settings.aboutEnabled}
 			/>
 			{dirty && (
 				<div className="unsaved-indicator" aria-label="Unsaved changes" />
@@ -243,30 +262,52 @@ export function PostEditor({ id }: PostEditorProps) {
 					</div>
 					
 					{/* Backlinks section */}
-					{backlinks && backlinks.length > 0 && (
-						<div className="backlinks-section" style={{ 
-							maxWidth: 800, 
-							margin: "48px auto 0", 
+					{(backlinksLoading || (backlinks && backlinks.length > 0)) && (
+						<div className="backlinks-section" style={{
+							maxWidth: 800,
+							margin: "48px auto 0",
 							padding: "24px",
 							borderTop: "1px solid var(--hairline)"
 						}}>
-							<h3 style={{ 
-								fontSize: "18px", 
-								fontWeight: 500, 
+							<h3 style={{
+								fontSize: "18px",
+								fontWeight: 500,
 								margin: "0 0 16px",
 								color: "#666"
 							}}>
 								Linked from
 							</h3>
-							<ul style={{ 
-								listStyle: "none", 
-								margin: 0, 
-								padding: 0,
-								display: "flex",
-								flexDirection: "column",
-								gap: "8px"
-							}}>
-								{(backlinks || []).map((post) => (
+
+							{backlinksLoading && (
+								<div style={{
+									padding: "16px 0",
+									color: "#666",
+									fontSize: "14px"
+								}}>
+									Loading backlinks...
+								</div>
+							)}
+
+							{!backlinksLoading && (!backlinks || backlinks.length === 0) && (
+								<div style={{
+									padding: "16px 0",
+									color: "#666",
+									fontSize: "14px"
+								}}>
+									No posts link to this one yet.
+								</div>
+							)}
+
+							{!backlinksLoading && backlinks && backlinks.length > 0 && (
+								<ul style={{
+									listStyle: "none",
+									margin: 0,
+									padding: 0,
+									display: "flex",
+									flexDirection: "column",
+									gap: "8px"
+								}}>
+									{backlinks.map((post) => (
 									<li key={post.id}>
 										<Link
 											href={`/posts/${post.id}`}
@@ -303,7 +344,8 @@ export function PostEditor({ id }: PostEditorProps) {
 										</Link>
 									</li>
 								))}
-							</ul>
+								</ul>
+							)}
 						</div>
 					)}
 				</main>

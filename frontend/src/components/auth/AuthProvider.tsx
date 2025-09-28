@@ -7,6 +7,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 	const [user, setUser] = useState<User | null>(null);
 	const [token, setToken] = useState<string | null>(null);
 	const [refreshTokenValue, setRefreshTokenValue] = useState<string | null>(null);
+	const [isLoading, setIsLoading] = useState(true);
 
 	useEffect(() => {
 		// Check for existing tokens in localStorage
@@ -26,6 +27,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 						if (savedRefreshToken) {
 							setRefreshTokenValue(savedRefreshToken);
 						}
+						setIsLoading(false);
 					} else {
 						// Token expired, try refresh if we have refresh token
 						if (savedRefreshToken) {
@@ -34,6 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 							// No refresh token, clear everything
 							localStorage.removeItem("auth_token");
 							localStorage.removeItem("refresh_token");
+							setIsLoading(false);
 						}
 					}
 				})
@@ -45,8 +48,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 					} else {
 						localStorage.removeItem("auth_token");
 						localStorage.removeItem("refresh_token");
+						setIsLoading(false);
 					}
 				});
+		} else {
+			// No saved token, not loading anymore
+			setIsLoading(false);
 		}
 	}, []);
 
@@ -75,6 +82,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 			console.error("AuthProvider: Token refresh request failed", error);
 			localStorage.removeItem("auth_token");
 			localStorage.removeItem("refresh_token");
+		} finally {
+			setIsLoading(false);
 		}
 	};
 
@@ -182,6 +191,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 				logout,
 				isAuthenticated: !!token && !!user,
 				refreshToken,
+				isLoading,
 			}}
 		>
 			{children}
