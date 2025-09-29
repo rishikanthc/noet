@@ -4,10 +4,11 @@ import {
 	useRef,
 	useCallback,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { type EditorRef, type MentionItem } from "textforge";
 import { useAuth } from "../../hooks/useAuth";
 import { useSettings } from "../../hooks/useSettings";
-import { useUpdatePost } from "../../hooks/usePostsQuery";
+import { useUpdatePost, postsQueryKeys } from "../../hooks/usePostsQuery";
 import { Header } from "../layout/Header";
 import { AIEnabledEditor } from "../common/AIEnabledEditor";
 import { type Note } from "../../types";
@@ -22,6 +23,7 @@ export function PostEditor({ id }: PostEditorProps) {
 	const { isAuthenticated, token, logout, isLoading: authLoading } = useAuth();
 	const { settings } = useSettings();
 	const updatePostMutation = useUpdatePost();
+	const queryClient = useQueryClient();
 	const [content, setContent] = useState<string>("");
 	const [error, setError] = useState<string | undefined>();
 	const [dirty, setDirty] = useState(false);
@@ -35,19 +37,15 @@ export function PostEditor({ id }: PostEditorProps) {
 	const initialContentRef = useRef<string>("");
 
 	const loadBacklinks = useCallback(async () => {
-		console.log(`[PostEditor] Loading backlinks for post ${id}`);
 		setBacklinksLoading(true);
 		try {
 			const res = await fetch(`/api/posts/${id}/backlinks`, {
 				headers: token ? { Authorization: `Bearer ${token}` } : {}
 			});
-			console.log(`[PostEditor] Backlinks response status: ${res.status}`);
 			if (res.ok) {
 				const backlinksData: Note[] = await res.json();
-				console.log(`[PostEditor] Backlinks data:`, backlinksData);
 				setBacklinks(backlinksData || []);
 			} else {
-				console.log(`[PostEditor] Backlinks request failed with status: ${res.status}`);
 				setBacklinks([]);
 			}
 		} catch (e) {
@@ -141,22 +139,42 @@ export function PostEditor({ id }: PostEditorProps) {
 
 		// Load post mentions in parallel (for editor functionality)
 		const loadPostMentions = async () => {
+			const cachedPosts =
+				queryClient.getQueryData<Note[]>(postsQueryKeys.list(true)) ??
+				queryClient.getQueryData<Note[]>(postsQueryKeys.list(false));
+
+			if (cachedPosts && cachedPosts.length > 0) {
+				if (!cancelled) {
+					const mentions: MentionItem[] = cachedPosts
+						.filter(post => post.id.toString() !== id)
+						.map(post => ({
+							id: post.id.toString(),
+							label: post.title && post.title.trim() ? post.title : `Untitled Post ${post.id}`,
+							url: `/posts/${post.id}`,
+						}));
+					setPostMentions(mentions);
+				}
+				return;
+			}
+
 			try {
 				const response = await fetch("/api/posts", {
 					headers: token ? { Authorization: `Bearer ${token}` } : {}
 				});
 				if (response.ok) {
 					const posts: Note[] = await response.json();
-					const mentions: MentionItem[] = posts
-						.filter(post => post.id.toString() !== id)
-						.map(post => ({
-							id: post.id.toString(),
-							label: post.title && post.title.trim() ? post.title : `Untitled Post ${post.id}`,
-							url: `/posts/${post.id}`
-						}));
-					if (!cancelled) setPostMentions(mentions);
-				} else {
-					if (!cancelled) setPostMentions([]);
+					if (!cancelled) {
+						const mentions: MentionItem[] = posts
+							.filter(post => post.id.toString() !== id)
+							.map(post => ({
+								id: post.id.toString(),
+								label: post.title && post.title.trim() ? post.title : `Untitled Post ${post.id}`,
+								url: `/posts/${post.id}`,
+							}));
+						setPostMentions(mentions);
+					}
+				} else if (!cancelled) {
+					setPostMentions([]);
 				}
 			} catch (e) {
 				// Fail silently for mentions - not critical for post display
@@ -174,7 +192,7 @@ export function PostEditor({ id }: PostEditorProps) {
 		return () => {
 			cancelled = true;
 		};
-	}, [id, token, authLoading, loadBacklinks]);
+	}, [id, token, authLoading, loadBacklinks, queryClient]);
 
 	if (authLoading) {
 		return (

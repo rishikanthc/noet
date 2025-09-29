@@ -3,9 +3,11 @@ import {
 	useState,
 	useRef,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { type EditorRef, type MentionItem } from "textforge";
 import { useAuth } from "../../hooks/useAuth";
 import { useSettings } from "../../hooks/useSettings";
+import { postsQueryKeys } from "../../hooks/usePostsQuery";
 import { Header } from "../layout/Header";
 import { AIEnabledEditor } from "../common/AIEnabledEditor";
 import { type Note } from "../../types";
@@ -15,6 +17,7 @@ import { Link } from "../common/Link";
 export function AboutMe() {
 	const { isAuthenticated, token, logout } = useAuth();
 	const { settings } = useSettings();
+	const queryClient = useQueryClient();
 	const [content, setContent] = useState<string>("");
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
@@ -75,35 +78,56 @@ export function AboutMe() {
 	}, []);
 
 	useEffect(() => {
-		// Load post mentions
+		let cancelled = false;
+
+		const applyMentions = (posts: Note[]) => {
+			if (cancelled) return;
+			setPostMentions(
+				posts.map(post => ({
+					id: post.id.toString(),
+					label: post.title && post.title.trim() ? post.title : `Untitled Post ${post.id}`,
+					url: `/posts/${post.id}`,
+				}))
+			);
+			setMentionsLoaded(true);
+		};
+
 		const loadPostMentions = async () => {
+			const cachedPosts =
+				queryClient.getQueryData<Note[]>(postsQueryKeys.list(true)) ??
+				queryClient.getQueryData<Note[]>(postsQueryKeys.list(false));
+
+			if (cachedPosts && cachedPosts.length > 0) {
+				applyMentions(cachedPosts);
+				return;
+			}
+
 			try {
 				const res = await fetch("/api/posts", {
 					headers: token ? { Authorization: `Bearer ${token}` } : {}
 				});
 				if (res.ok) {
 					const posts: Note[] = await res.json();
-					// Convert posts to mention items for About Me page
-					const mentions: MentionItem[] = posts
-						.map(post => ({
-							id: post.id.toString(),
-							label: post.title && post.title.trim() ? post.title : `Untitled Post ${post.id}`,
-							url: `/posts/${post.id}`
-						}));
-					setPostMentions(mentions);
-				} else {
+					applyMentions(posts);
+				} else if (!cancelled) {
 					setPostMentions([]);
+					setMentionsLoaded(true);
 				}
 			} catch (e) {
-				console.error("AboutMe: Failed to load post mentions", e);
-				setPostMentions([]);
-			} finally {
-				setMentionsLoaded(true);
+				if (!cancelled) {
+					console.error("AboutMe: Failed to load post mentions", e);
+					setPostMentions([]);
+					setMentionsLoaded(true);
+				}
 			}
 		};
 
 		loadPostMentions();
-	}, [token]);
+
+		return () => {
+			cancelled = true;
+		};
+	}, [queryClient, token]);
 
 	// If About Me is disabled, show 404-like page
 	if (!loading && !settings.aboutEnabled) {

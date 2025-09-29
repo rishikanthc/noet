@@ -45,109 +45,31 @@ async function fetchPost(id: string, token: string | null): Promise<Note> {
 
 // Create a new post
 async function createPost(token: string): Promise<Note> {
-  console.log('🚀 createPost: Starting post creation');
-  console.log('🚀 createPost: Token present:', !!token);
-  console.log('🚀 createPost: User Agent:', navigator.userAgent);
-  console.log('🚀 createPost: Current URL:', window.location.href);
-
-  // Firefox CORS fix: Add Content-Type and empty JSON body for consistent CORS handling
-  // This ensures Firefox treats this the same as other working POST endpoints like login
-  // which also send JSON bodies and work properly in production
-
-  const fetchOptions = {
+  const response = await fetch('/api/posts', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
-    body: '{}', // Empty JSON body for consistent CORS handling
-    cache: 'no-cache' as RequestCache
-  };
+    body: '{}', // Empty JSON body keeps Firefox happy with CORS
+    cache: 'no-cache',
+  });
 
-  console.log('🚀 createPost: Fetch options:', JSON.stringify(fetchOptions, null, 2));
-  console.log('🚀 createPost: About to call fetch...');
-
-  let response: Response;
-  try {
-    response = await fetch('/api/posts', fetchOptions);
-    console.log('🚀 createPost: Fetch completed successfully');
-    console.log('🚀 createPost: Response status:', response.status);
-    console.log('🚀 createPost: Response ok:', response.ok);
-    console.log('🚀 createPost: Response headers:', Object.fromEntries(response.headers.entries()));
-  } catch (fetchError) {
-    console.error('🔥 createPost: Fetch failed with error:', {
-      error: fetchError,
-      errorName: fetchError instanceof Error ? fetchError.name : 'Unknown',
-      errorMessage: fetchError instanceof Error ? fetchError.message : 'Unknown error',
-      errorStack: fetchError instanceof Error ? fetchError.stack : 'No stack',
-      userAgent: navigator.userAgent,
-      currentUrl: window.location.href
-    });
-    throw fetchError;
-  }
-
-  // Clone response for error handling to avoid double-read issues in Firefox
-  console.log('🚀 createPost: Cloning response for Firefox compatibility');
-  const responseClone = response.clone();
-  console.log('🚀 createPost: Response cloned successfully');
+  const payload = await response.text();
 
   if (!response.ok) {
-    console.error('🔥 createPost: Response not OK, handling error');
-    console.log('🚀 createPost: Reading error text from cloned response...');
-
-    let errorText: string;
-    try {
-      errorText = await responseClone.text();
-      console.log('🚀 createPost: Error text read successfully:', errorText);
-    } catch (textError) {
-      console.error('🔥 createPost: Failed to read error text:', textError);
-      errorText = 'Unknown error';
-    }
-
-    const errorDetails = {
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
-      body: errorText,
-      userAgent: navigator.userAgent
-    };
-
-    console.error('🔥 createPost: Complete error details:', errorDetails);
-    throw new Error(`Failed to create post: ${response.status} - ${errorText}`);
+    const message = payload || response.statusText || 'Failed to create post';
+    throw new Error(`Failed to create post: ${response.status} - ${message}`);
   }
 
-  console.log('🚀 createPost: Response OK, parsing JSON...');
+  if (!payload) {
+    throw new Error('Create post response was empty');
+  }
 
   try {
-    console.log('🚀 createPost: About to call responseClone.json()...');
-    const result = await responseClone.json();
-    console.log('🚀 createPost: JSON parsed successfully:', result);
-    console.log('🚀 createPost: Post creation completed successfully!');
-    return result;
-  } catch (parseError) {
-    console.error('🔥 createPost: JSON parsing failed:', {
-      parseError,
-      errorName: parseError instanceof Error ? parseError.name : 'Unknown',
-      errorMessage: parseError instanceof Error ? parseError.message : 'Unknown parsing error',
-      errorStack: parseError instanceof Error ? parseError.stack : 'No stack',
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
-      responseType: response.headers.get('content-type'),
-      userAgent: navigator.userAgent
-    });
-
-    // Use a fresh clone to get raw text for debugging (Firefox-safe)
-    console.log('🚀 createPost: Attempting to read raw response text for debugging...');
-    try {
-      const debugResponse = response.clone();
-      const rawText = await debugResponse.text();
-      console.error('🔥 createPost: Raw response body:', rawText);
-    } catch (debugError) {
-      console.error('🔥 createPost: Could not read raw response text:', debugError);
-    }
-
-    throw new Error(`Failed to parse create post response: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`);
+    return JSON.parse(payload) as Note;
+  } catch (error) {
+    throw new Error(`Failed to parse create post response: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 
@@ -185,111 +107,31 @@ async function deletePost(id: string, token: string): Promise<void> {
 
 // Toggle post privacy
 async function togglePostPrivacy(id: string, token: string): Promise<Note> {
-  console.log('🚀 togglePostPrivacy: Starting privacy toggle for post', id);
-  console.log('🚀 togglePostPrivacy: Token present:', !!token);
-  console.log('🚀 togglePostPrivacy: User Agent:', navigator.userAgent);
-
-  // Firefox CORS fix: Add Content-Type and empty JSON body for consistent CORS handling
-  // This ensures Firefox treats this the same as other working endpoints like createPost
-  // which also send JSON bodies and work properly in production
-
-  const fetchOptions = {
+  const response = await fetch(`/api/posts/${id}/publish`, {
     method: 'PUT',
     headers: {
       Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
     },
-    body: '{}', // Empty JSON body for consistent CORS handling
-    cache: 'no-cache' as RequestCache
-  };
+    body: '{}', // Empty JSON body keeps Firefox CORS behaviour consistent
+    cache: 'no-cache',
+  });
 
-  console.log('🚀 togglePostPrivacy: Fetch options:', JSON.stringify(fetchOptions, null, 2));
-  console.log('🚀 togglePostPrivacy: About to call fetch...');
-
-  let response: Response;
-  try {
-    response = await fetch(`/api/posts/${id}/publish`, fetchOptions);
-    console.log('🚀 togglePostPrivacy: Fetch completed successfully');
-    console.log('🚀 togglePostPrivacy: Response status:', response.status);
-    console.log('🚀 togglePostPrivacy: Response ok:', response.ok);
-    console.log('🚀 togglePostPrivacy: Response headers:', Object.fromEntries(response.headers.entries()));
-  } catch (fetchError) {
-    console.error('🔥 togglePostPrivacy: Fetch failed with error:', {
-      error: fetchError,
-      errorName: fetchError instanceof Error ? fetchError.name : 'Unknown',
-      errorMessage: fetchError instanceof Error ? fetchError.message : 'Unknown error',
-      errorStack: fetchError instanceof Error ? fetchError.stack : 'No stack',
-      userAgent: navigator.userAgent,
-      currentUrl: window.location.href,
-      postId: id
-    });
-    throw fetchError;
-  }
-
-  // Clone response for error handling to avoid double-read issues in Firefox
-  console.log('🚀 togglePostPrivacy: Cloning response for Firefox compatibility');
-  const responseClone = response.clone();
-  console.log('🚀 togglePostPrivacy: Response cloned successfully');
+  const payload = await response.text();
 
   if (!response.ok) {
-    console.error('🔥 togglePostPrivacy: Response not OK, handling error');
-    console.log('🚀 togglePostPrivacy: Reading error text from cloned response...');
-
-    let errorText: string;
-    try {
-      errorText = await responseClone.text();
-      console.log('🚀 togglePostPrivacy: Error text read successfully:', errorText);
-    } catch (textError) {
-      console.error('🔥 togglePostPrivacy: Failed to read error text:', textError);
-      errorText = 'Unknown error';
-    }
-
-    const errorDetails = {
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
-      body: errorText,
-      userAgent: navigator.userAgent,
-      postId: id
-    };
-
-    console.error('🔥 togglePostPrivacy: Complete error details:', errorDetails);
-    throw new Error(`Failed to toggle post privacy: ${response.status} - ${errorText}`);
+    const message = payload || response.statusText || 'Failed to toggle post privacy';
+    throw new Error(`Failed to toggle post privacy: ${response.status} - ${message}`);
   }
 
-  console.log('🚀 togglePostPrivacy: Response OK, parsing JSON...');
+  if (!payload) {
+    throw new Error('Toggle privacy response was empty');
+  }
 
   try {
-    console.log('🚀 togglePostPrivacy: About to call responseClone.json()...');
-    const result = await responseClone.json();
-    console.log('🚀 togglePostPrivacy: JSON parsed successfully:', result);
-    console.log('🚀 togglePostPrivacy: Privacy toggle completed successfully!');
-    return result;
-  } catch (parseError) {
-    console.error('🔥 togglePostPrivacy: JSON parsing failed:', {
-      parseError,
-      errorName: parseError instanceof Error ? parseError.name : 'Unknown',
-      errorMessage: parseError instanceof Error ? parseError.message : 'Unknown parsing error',
-      errorStack: parseError instanceof Error ? parseError.stack : 'No stack',
-      status: response.status,
-      statusText: response.statusText,
-      headers: Object.fromEntries(response.headers.entries()),
-      responseType: response.headers.get('content-type'),
-      userAgent: navigator.userAgent,
-      postId: id
-    });
-
-    // Use a fresh clone to get raw text for debugging (Firefox-safe)
-    console.log('🚀 togglePostPrivacy: Attempting to read raw response text for debugging...');
-    try {
-      const debugResponse = response.clone();
-      const rawText = await debugResponse.text();
-      console.error('🔥 togglePostPrivacy: Raw response body:', rawText);
-    } catch (debugError) {
-      console.error('🔥 togglePostPrivacy: Could not read raw response text:', debugError);
-    }
-
-    throw new Error(`Failed to parse toggle privacy response: ${parseError instanceof Error ? parseError.message : 'Unknown parsing error'}`);
+    return JSON.parse(payload) as Note;
+  } catch (error) {
+    throw new Error(`Failed to parse toggle privacy response: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 }
 

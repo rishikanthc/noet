@@ -1,5 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { postsQueryKeys } from './usePostsQuery';
+import { fetchSettings } from './useSettings';
 
 // Hook to prefetch data for instant navigation
 export function usePrefetch(token: string | null) {
@@ -42,13 +43,7 @@ export function usePrefetch(token: string | null) {
   const prefetchSettings = () => {
     queryClient.prefetchQuery({
       queryKey: ['settings'],
-      queryFn: async () => {
-        const response = await fetch('/api/settings');
-        if (!response.ok) {
-          throw new Error('Failed to load settings');
-        }
-        return response.json();
-      },
+      queryFn: fetchSettings,
       staleTime: 5 * 60 * 1000, // 5 minutes
     });
   };
