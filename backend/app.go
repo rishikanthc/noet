@@ -84,10 +84,10 @@ type Claims struct {
 }
 
 type siteSettings struct {
-	SiteTitle    string
-	IntroText    string
-	HeroImage    string
-	AboutEnabled bool
+	SiteTitle    string `json:"siteTitle"`
+	IntroText    string `json:"introText"`
+	HeroImage    string `json:"heroImage"`
+	AboutEnabled bool   `json:"aboutEnabled"`
 }
 
 type pageMeta struct {
@@ -103,8 +103,15 @@ type renderPostItem struct {
 }
 
 type aboutSettings struct {
-	Content string
-	Enabled bool
+	Content string `json:"content"`
+	Enabled bool   `json:"enabled"`
+}
+
+type pageRender struct {
+	body    string
+	meta    pageMeta
+	status  int
+	hydrate map[string]any
 }
 
 var (
@@ -2289,24 +2296,22 @@ func (a *App) servePreRenderedPage(w http.ResponseWriter, r *http.Request) bool 
 	path := r.URL.Path
 
 	var (
-		body   string
-		meta   pageMeta
-		status = http.StatusOK
-		err    error
+		page  pageRender
+		err   error
+		found = true
 	)
 
 	switch {
 	case path == "/":
-		body, meta, err = a.renderHomePage()
+		page, err = a.renderHomePage()
 	case path == "/archive":
-		body, meta, err = a.renderArchivePage()
+		page, err = a.renderArchivePage()
 	case path == "/about":
-		body, meta, err = a.renderAboutPage()
+		page, err = a.renderAboutPage()
 	case strings.HasPrefix(path, "/posts/"):
-		var found bool
-		body, meta, status, found, err = a.renderPostPage(strings.TrimPrefix(path, "/posts/"))
+		page, found, err = a.renderPostPage(strings.TrimPrefix(path, "/posts/"))
 		if err == nil && !found {
-			body, meta, status, err = a.renderNotFoundPage()
+			page, err = a.renderNotFoundPage()
 		}
 	default:
 		return false
@@ -2317,39 +2322,46 @@ func (a *App) servePreRenderedPage(w http.ResponseWriter, r *http.Request) bool 
 		return false
 	}
 
-	if body == "" {
+	if page.body == "" {
 		return false
 	}
 
-	page, err := a.wrapWithShell(body, meta)
+	wrapped, err := a.wrapWithShell(page.body, page.meta, page.hydrate)
 	if err != nil {
 		a.Logger.Error("failed to wrap SSR page", "path", path, "error", err)
 		return false
 	}
 
+	status := page.status
+	if status == 0 {
+		status = http.StatusOK
+	}
+
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.WriteHeader(status)
-	_, _ = w.Write(page)
+	_, _ = w.Write(wrapped)
 	return true
 }
 
-func (a *App) renderHomePage() (string, pageMeta, error) {
+func (a *App) renderHomePage() (pageRender, error) {
 	settings, err := a.getPublicSettings()
 	if err != nil {
-		return "", pageMeta{}, err
+		return pageRender{}, err
 	}
 
-	posts, err := a.getPostsWithPrivacy(false)
+	allPosts, err := a.getPostsWithPrivacy(false)
 	if err != nil {
-		return "", pageMeta{}, err
-	}
-	if len(posts) > 10 {
-		posts = posts[:10]
+		return pageRender{}, err
 	}
 
-	items := make([]renderPostItem, 0, len(posts))
-	for _, p := range posts {
+	displayPosts := allPosts
+	if len(displayPosts) > 10 {
+		displayPosts = displayPosts[:10]
+	}
+
+	items := make([]renderPostItem, 0, len(displayPosts))
+	for _, p := range displayPosts {
 		title := defaultPostTitle(p.Title, p.ID)
 		items = append(items, renderPostItem{
 			ID:    p.ID,
@@ -2379,7 +2391,7 @@ func (a *App) renderHomePage() (string, pageMeta, error) {
 	}
 
 	if err := homePageTemplate.Execute(&buf, data); err != nil {
-		return "", pageMeta{}, err
+		return pageRender{}, err
 	}
 
 	meta := pageMeta{
@@ -2387,18 +2399,29 @@ func (a *App) renderHomePage() (string, pageMeta, error) {
 		description: truncateWithEllipsis(intro, 160),
 		canonical:   "/",
 	}
-	return buf.String(), meta, nil
+
+	hydrate := map[string]any{
+		"route":    "/",
+		"settings": settings,
+		"posts":    allPosts,
+	}
+
+	return pageRender{
+		body:    buf.String(),
+		meta:    meta,
+		hydrate: hydrate,
+	}, nil
 }
 
-func (a *App) renderArchivePage() (string, pageMeta, error) {
+func (a *App) renderArchivePage() (pageRender, error) {
 	settings, err := a.getPublicSettings()
 	if err != nil {
-		return "", pageMeta{}, err
+		return pageRender{}, err
 	}
 
 	posts, err := a.getPostsWithPrivacy(false)
 	if err != nil {
-		return "", pageMeta{}, err
+		return pageRender{}, err
 	}
 
 	items := make([]renderPostItem, 0, len(posts))
@@ -2422,7 +2445,7 @@ func (a *App) renderArchivePage() (string, pageMeta, error) {
 	}
 
 	if err := archivePageTemplate.Execute(&buf, data); err != nil {
-		return "", pageMeta{}, err
+		return pageRender{}, err
 	}
 
 	meta := pageMeta{
@@ -2430,18 +2453,27 @@ func (a *App) renderArchivePage() (string, pageMeta, error) {
 		description: fmt.Sprintf("%d posts", len(items)),
 		canonical:   "/archive",
 	}
-	return buf.String(), meta, nil
+
+	return pageRender{
+		body: buf.String(),
+		meta: meta,
+		hydrate: map[string]any{
+			"route":    "/archive",
+			"settings": settings,
+			"posts":    posts,
+		},
+	}, nil
 }
 
-func (a *App) renderAboutPage() (string, pageMeta, error) {
+func (a *App) renderAboutPage() (pageRender, error) {
 	settings, err := a.getPublicSettings()
 	if err != nil {
-		return "", pageMeta{}, err
+		return pageRender{}, err
 	}
 
 	content, enabled, err := a.getAboutContent()
 	if err != nil {
-		return "", pageMeta{}, err
+		return pageRender{}, err
 	}
 
 	var buf bytes.Buffer
@@ -2458,7 +2490,7 @@ func (a *App) renderAboutPage() (string, pageMeta, error) {
 	}
 
 	if err := aboutPageTemplate.Execute(&buf, data); err != nil {
-		return "", pageMeta{}, err
+		return pageRender{}, err
 	}
 
 	description := "Personal profile"
@@ -2470,30 +2502,42 @@ func (a *App) renderAboutPage() (string, pageMeta, error) {
 		description: description,
 		canonical:   "/about",
 	}
-	return buf.String(), meta, nil
+
+	return pageRender{
+		body: buf.String(),
+		meta: meta,
+		hydrate: map[string]any{
+			"route":    "/about",
+			"settings": settings,
+			"about": aboutSettings{
+				Content: content,
+				Enabled: enabled,
+			},
+		},
+	}, nil
 }
 
-func (a *App) renderPostPage(id string) (string, pageMeta, int, bool, error) {
+func (a *App) renderPostPage(id string) (pageRender, bool, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
-		return "", pageMeta{}, http.StatusNotFound, false, nil
+		return pageRender{}, false, nil
 	}
 
 	post, err := a.getPost(id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", pageMeta{}, http.StatusNotFound, false, nil
+			return pageRender{}, false, nil
 		}
-		return "", pageMeta{}, http.StatusInternalServerError, false, err
+		return pageRender{}, false, err
 	}
 
 	if post.IsPrivate {
-		return "", pageMeta{}, http.StatusNotFound, false, nil
+		return pageRender{}, false, nil
 	}
 
 	settings, err := a.getPublicSettings()
 	if err != nil {
-		return "", pageMeta{}, http.StatusInternalServerError, false, err
+		return pageRender{}, false, err
 	}
 
 	title := defaultPostTitle(post.Title, post.ID)
@@ -2514,7 +2558,7 @@ func (a *App) renderPostPage(id string) (string, pageMeta, int, bool, error) {
 	}
 
 	if err := postPageTemplate.Execute(&buf, data); err != nil {
-		return "", pageMeta{}, http.StatusInternalServerError, false, err
+		return pageRender{}, false, err
 	}
 
 	description := truncateWithEllipsis(stripHTML(post.Content), 160)
@@ -2523,29 +2567,47 @@ func (a *App) renderPostPage(id string) (string, pageMeta, int, bool, error) {
 		description: description,
 		canonical:   fmt.Sprintf("/posts/%s", id),
 	}
-	return buf.String(), meta, http.StatusOK, true, nil
+
+	return pageRender{
+		body:   buf.String(),
+		meta:   meta,
+		status: http.StatusOK,
+		hydrate: map[string]any{
+			"route":    fmt.Sprintf("/posts/%s", id),
+			"settings": settings,
+			"post":     post,
+		},
+	}, true, nil
 }
 
-func (a *App) renderNotFoundPage() (string, pageMeta, int, error) {
+func (a *App) renderNotFoundPage() (pageRender, error) {
 	settings, err := a.getPublicSettings()
 	if err != nil {
-		return "", pageMeta{}, http.StatusInternalServerError, err
+		return pageRender{}, err
 	}
 	var buf bytes.Buffer
 	data := struct {
 		SiteTitle string
 	}{SiteTitle: settings.SiteTitle}
 	if err := notFoundTemplate.Execute(&buf, data); err != nil {
-		return "", pageMeta{}, http.StatusInternalServerError, err
+		return pageRender{}, err
 	}
 	meta := pageMeta{
 		title:       buildPageTitle("Not Found", settings.SiteTitle),
 		description: "The requested page could not be found.",
 	}
-	return buf.String(), meta, http.StatusNotFound, nil
+	return pageRender{
+		body:   buf.String(),
+		meta:   meta,
+		status: http.StatusNotFound,
+		hydrate: map[string]any{
+			"route":    "__not_found__",
+			"settings": settings,
+		},
+	}, nil
 }
 
-func (a *App) wrapWithShell(content string, meta pageMeta) ([]byte, error) {
+func (a *App) wrapWithShell(content string, meta pageMeta, hydrate map[string]any) ([]byte, error) {
 	base, err := staticFS.ReadFile("static/index.html")
 	if err != nil {
 		return nil, err
@@ -2569,6 +2631,14 @@ func (a *App) wrapWithShell(content string, meta pageMeta) ([]byte, error) {
 	}
 	if extraHead != "" {
 		html = strings.Replace(html, "</head>", extraHead+"\n  </head>", 1)
+	}
+
+	if len(hydrate) > 0 {
+		if payload, err := json.Marshal(hydrate); err == nil {
+			escaped := template.HTMLEscapeString(string(payload))
+			script := "\n    <script id=\"__NOET_DATA__\" type=\"application/json\">" + escaped + "</script>"
+			html = strings.Replace(html, "</head>", script+"\n  </head>", 1)
+		}
 	}
 
 	if content != "" {

@@ -3,6 +3,7 @@ import {
 	useState,
 	useRef,
 	useCallback,
+	useMemo,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { type EditorRef, type MentionItem } from "textforge";
@@ -14,6 +15,7 @@ import { AIEnabledEditor } from "../common/AIEnabledEditor";
 import { type Note } from "../../types";
 import { navigateTo } from "../../lib/router";
 import { Link } from "../common/Link";
+import { getPreloadedData } from "../../lib/preloadedData";
 
 interface PostEditorProps {
 	id: string;
@@ -24,6 +26,13 @@ export function PostEditor({ id }: PostEditorProps) {
 	const { settings } = useSettings();
 	const updatePostMutation = useUpdatePost();
 	const queryClient = useQueryClient();
+	const preloaded = getPreloadedData<Record<string, unknown>>();
+	const preloadedPost = useMemo(() => {
+		const maybePost = preloaded?.post as Note | undefined;
+		if (!maybePost) return undefined;
+		return String(maybePost.id) === id ? maybePost : undefined;
+	}, [preloaded, id]);
+	const preloadedAppliedRef = useRef(false);
 	const [content, setContent] = useState<string>("");
 	const [error, setError] = useState<string | undefined>();
 	const [dirty, setDirty] = useState(false);
@@ -99,6 +108,18 @@ export function PostEditor({ id }: PostEditorProps) {
 			setCreating(false);
 		}
 	};
+
+	useEffect(() => {
+		if (!preloadedPost || preloadedAppliedRef.current) {
+			return;
+		}
+		const initialContent = preloadedPost.content || "";
+		setContent(initialContent);
+		latestContentRef.current = initialContent;
+		initialContentRef.current = initialContent;
+		setDirty(false);
+		preloadedAppliedRef.current = true;
+	}, [preloadedPost]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -257,7 +278,7 @@ export function PostEditor({ id }: PostEditorProps) {
 											}
 											
 											try {
-												const updatedPost = await updatePostMutation.mutateAsync({
+												await updatePostMutation.mutateAsync({
 													id,
 													content: html,
 													token
@@ -266,8 +287,6 @@ export function PostEditor({ id }: PostEditorProps) {
 												if (latestContentRef.current === html) {
 													setDirty(false);
 												}
-												// Refresh backlinks after save
-												loadBacklinks();
 											} catch (e) {
 												console.error("PostEditor: Auto-save failed", e);
 												// keep dirty = true so the dot stays visible

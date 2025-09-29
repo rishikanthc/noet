@@ -13,19 +13,28 @@ import { AIEnabledEditor } from "../common/AIEnabledEditor";
 import { type Note } from "../../types";
 import { navigateTo } from "../../lib/router";
 import { Link } from "../common/Link";
+import { getPreloadedData } from "../../lib/preloadedData";
 
 export function AboutMe() {
 	const { isAuthenticated, token, logout } = useAuth();
 	const { settings } = useSettings();
 	const queryClient = useQueryClient();
-	const [content, setContent] = useState<string>("");
-	const [loading, setLoading] = useState(true);
+	const preloaded = getPreloadedData<Record<string, unknown>>();
+	const preloadedAbout = (preloaded?.about as { content?: string; enabled?: boolean }) || undefined;
+	const [content, setContent] = useState<string>(() => preloadedAbout?.content ?? "");
+	const [loading, setLoading] = useState(() => !(preloadedAbout && typeof preloadedAbout.content === "string"));
 	const [error, setError] = useState<string | undefined>();
 	const [dirty, setDirty] = useState(false);
 	const [postMentions, setPostMentions] = useState<MentionItem[]>([]);
 	const [mentionsLoaded, setMentionsLoaded] = useState(false);
 	const editorRef = useRef<EditorRef>(null);
 	const latestContentRef = useRef<string>("");
+
+	useEffect(() => {
+		if (preloadedAbout?.content && !latestContentRef.current) {
+			latestContentRef.current = preloadedAbout.content;
+		}
+	}, [preloadedAbout]);
 
 	const handleImageUpload = async (file: File): Promise<string> => {
 		if (!token) {
@@ -149,7 +158,7 @@ export function AboutMe() {
 		);
 	}
 
-	if ((loading && !content) || !mentionsLoaded)
+	if (loading && !content)
 		return (
 			<div className="app-container">
 				<p>Loading…</p>
