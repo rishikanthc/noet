@@ -2153,7 +2153,16 @@ func (a *App) routes() {
 			return
 		}
 
-		etag := generateETag(index)
+		fallback := index
+		if settings, serr := a.getPublicSettings(); serr == nil {
+			if wrapped, werr := a.wrapWithShell("", pageMeta{title: settings.SiteTitle}, map[string]any{
+				"settings": settings,
+			}); werr == nil {
+				fallback = wrapped
+			}
+		}
+
+		etag := generateETag(fallback)
 		setStaticCacheHeaders(w, "index.html", etag)
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
@@ -2162,7 +2171,7 @@ func (a *App) routes() {
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(index)
+		_, _ = w.Write(fallback)
 	})
 }
 

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Login } from "./auth/Login";
 import { Registration } from "./auth/Registration";
 import { Home } from "./pages/Home";
@@ -9,6 +10,8 @@ import { PostEditor } from "./pages/PostEditor";
 import { usePrefetch } from "../hooks/usePrefetch";
 import { useAuth } from "../hooks/useAuth";
 import { useRouter } from "../hooks/useRouter";
+import { useSettings } from "../hooks/useSettings";
+import { postsQueryKeys } from "../hooks/usePostsQuery";
 
 export function AppContent() {
 	const [needsSetup, setNeedsSetup] = useState<boolean | null>(null);
@@ -16,6 +19,8 @@ export function AppContent() {
 	const { token } = useAuth();
 	const { prefetchPosts, prefetchSettings } = usePrefetch(token);
 	const { path } = useRouter();
+	const queryClient = useQueryClient();
+	const { settings } = useSettings();
 
 	const match = useMemo(() => {
 		const m = path.match(/^\/posts\/([A-Za-z0-9_-]+)$/);
@@ -51,6 +56,35 @@ export function AppContent() {
 			prefetchSettings();
 		}
 	}, [setupLoading, needsSetup, token, prefetchPosts, prefetchSettings]);
+
+	useEffect(() => {
+		const siteTitle = settings.siteTitle?.trim() || "Noet";
+		let title = siteTitle;
+
+		if (path === "/archive") {
+			title = `Archive — ${siteTitle}`;
+		} else if (path === "/about") {
+			title = `About — ${siteTitle}`;
+		} else if (path === "/settings") {
+			title = `Settings — ${siteTitle}`;
+		} else if (match) {
+			const detailKey = postsQueryKeys.detail(match);
+			const post =
+				queryClient.getQueryData(detailKey) as { title?: string; id?: number } | undefined;
+			const listPost =
+				(queryClient.getQueryData(postsQueryKeys.list(true)) as { id: number; title?: string }[] | undefined)?.find(
+					(p) => String(p.id) === match,
+				);
+			const resolvedTitle = post?.title || listPost?.title;
+			if (resolvedTitle && resolvedTitle.trim()) {
+				title = `${resolvedTitle.trim()} — ${siteTitle}`;
+			} else {
+				title = `Untitled Post ${match} — ${siteTitle}`;
+			}
+		}
+
+		document.title = title;
+	}, [path, match, queryClient, settings.siteTitle]);
 
 	// Show loading while checking setup status
 	if (setupLoading) {
