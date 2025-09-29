@@ -1639,14 +1639,39 @@ func (a *App) routes() {
 					http.Error(w, "invalid json", http.StatusBadRequest)
 					return
 				}
-				title := extractTitleFromHTML(payload.Content)
+
+				existing, err := a.getPost(idStr)
+				if err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						http.NotFound(w, r)
+					} else {
+						http.Error(w, "db error", http.StatusInternalServerError)
+					}
+					return
+				}
+
+				title := strings.TrimSpace(extractTitleFromHTML(payload.Content))
 				var titlePtr *string
-				if strings.TrimSpace(title) != "" {
+				if title != "" {
 					titlePtr = &title
 				}
+
+				existingTitle := ""
+				if existing.Title != nil {
+					existingTitle = strings.TrimSpace(*existing.Title)
+				}
+
+				contentChanged := existing.Content != payload.Content
+				titleChanged := existingTitle != title
+				if !contentChanged && !titleChanged {
+					a.Logger.Debug("No post changes detected, skipping update", "postID", idStr)
+					w.Header().Set("Content-Type", "application/json")
+					_ = json.NewEncoder(w).Encode(existing)
+					return
+				}
+
 				now := time.Now()
-				// update
-				_, err := a.DB.Exec(`UPDATE posts SET title = ?, content = ?, updated_at = ? WHERE id = ?`, titlePtr, payload.Content, now, idStr)
+				_, err = a.DB.Exec(`UPDATE posts SET title = ?, content = ?, updated_at = ? WHERE id = ?`, titlePtr, payload.Content, now, idStr)
 				if err != nil {
 					a.Logger.Error("Failed to update post in database", "postID", idStr, "error", err.Error())
 					http.Error(w, "db error", http.StatusInternalServerError)
