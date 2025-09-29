@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"hash/fnv"
+	"html/template"
 	"io"
 	"log/slog"
 	"mime"
@@ -82,6 +83,177 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+type siteSettings struct {
+	SiteTitle    string
+	IntroText    string
+	HeroImage    string
+	AboutEnabled bool
+}
+
+type pageMeta struct {
+	title       string
+	description string
+	canonical   string
+}
+
+type renderPostItem struct {
+	ID    int64
+	Title string
+	Date  string
+}
+
+type aboutSettings struct {
+	Content string
+	Enabled bool
+}
+
+var (
+	homePageTemplate = template.Must(template.New("home_ssr").Parse(`
+<div class="home-container">
+  <header class="site-header ssr-header">
+    <div class="site-header-content">
+      <div class="site-title">{{.SiteTitle}}</div>
+      <nav class="header-actions ssr-nav" aria-label="Primary">
+        <a class="header-button" href="/">Home</a>
+        <a class="header-button" href="/archive">Archive</a>
+        {{if .AboutEnabled}}<a class="header-button" href="/about">About Me</a>{{end}}
+        <a class="header-button" href="/rss.xml">RSS</a>
+      </nav>
+    </div>
+  </header>
+  <main class="home-content">
+    {{if .HeroImage}}
+    <div class="hero-section">
+      <img src="{{.HeroImage}}" alt="Hero image" class="hero-image" loading="lazy">
+    </div>
+    {{end}}
+    {{if .IntroText}}
+    <p class="intro-text">{{.IntroText}}</p>
+    {{end}}
+    <section>
+      <h1>Latest</h1>
+      {{if .Posts}}
+      <ul class="post-list">
+        {{range .Posts}}
+        <li>
+          <a class="post-link" href="/posts/{{.ID}}">
+            <span class="post-title">{{.Title}}</span>
+            <span class="post-meta"> — {{.Date}}</span>
+          </a>
+        </li>
+        {{end}}
+      </ul>
+      <div style="margin-top:24px;font-size:14px">
+        <a class="header-button" href="/archive">View the full archive →</a>
+      </div>
+      {{else}}
+      <p>No posts yet.</p>
+      {{end}}
+    </section>
+  </main>
+</div>`))
+
+	archivePageTemplate = template.Must(template.New("archive_ssr").Parse(`
+<div class="home-container">
+  <header class="site-header ssr-header">
+    <div class="site-header-content">
+      <div class="site-title">{{.SiteTitle}}</div>
+      <nav class="header-actions ssr-nav" aria-label="Primary">
+        <a class="header-button" href="/">Home</a>
+        <a class="header-button" href="/archive">Archive</a>
+        {{if .AboutEnabled}}<a class="header-button" href="/about">About Me</a>{{end}}
+        <a class="header-button" href="/rss.xml">RSS</a>
+      </nav>
+    </div>
+  </header>
+  <main class="home-content">
+    <h1>Archive</h1>
+    {{if .Posts}}
+    <ul class="post-list">
+      {{range .Posts}}
+      <li>
+        <a class="post-link" href="/posts/{{.ID}}">
+          <span class="post-title">{{.Title}}</span>
+          <span class="post-meta"> — {{.Date}}</span>
+        </a>
+      </li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p>No posts yet.</p>
+    {{end}}
+  </main>
+</div>`))
+
+	postPageTemplate = template.Must(template.New("post_ssr").Parse(`
+<div class="home-container">
+  <header class="site-header ssr-header">
+    <div class="site-header-content">
+      <div class="site-title">{{.SiteTitle}}</div>
+      <nav class="header-actions ssr-nav" aria-label="Primary">
+        <a class="header-button" href="/">Home</a>
+        <a class="header-button" href="/archive">Archive</a>
+        {{if .AboutEnabled}}<a class="header-button" href="/about">About Me</a>{{end}}
+        <a class="header-button" href="/rss.xml">RSS</a>
+      </nav>
+    </div>
+  </header>
+  <div class="app-container editor-page">
+    <main>
+      <article class="ssr-post">
+        <h1 class="post-title">{{.Title}}</h1>
+        <div class="post-meta">{{.Date}}</div>
+        <div class="post-content">{{.Content}}</div>
+      </article>
+    </main>
+  </div>
+</div>`))
+
+	aboutPageTemplate = template.Must(template.New("about_ssr").Parse(`
+<div class="home-container">
+  <header class="site-header ssr-header">
+    <div class="site-header-content">
+      <div class="site-title">{{.SiteTitle}}</div>
+      <nav class="header-actions ssr-nav" aria-label="Primary">
+        <a class="header-button" href="/">Home</a>
+        <a class="header-button" href="/archive">Archive</a>
+        {{if .AboutEnabled}}<a class="header-button" href="/about">About Me</a>{{end}}
+        <a class="header-button" href="/rss.xml">RSS</a>
+      </nav>
+    </div>
+  </header>
+  <div class="app-container editor-page">
+    <main>
+      {{if .Enabled}}
+      <article class="ssr-post">
+        <h1 class="post-title">About Me</h1>
+        <div class="post-content">{{.Content}}</div>
+      </article>
+      {{else}}
+      <div class="ssr-post">
+        <h1 class="post-title">Page Not Found</h1>
+        <p>The page you're looking for doesn't exist.</p>
+        <a class="header-button" href="/">← Go back home</a>
+      </div>
+      {{end}}
+    </main>
+  </div>
+</div>`))
+
+	notFoundTemplate = template.Must(template.New("not_found_ssr").Parse(`
+<div class="home-container">
+  <header class="site-header ssr-header">
+    <div class="site-header-content">
+      <div class="site-title">{{.SiteTitle}}</div>
+    </div>
+  </header>
+  <main class="home-content">
+    <h1>Not Found</h1>
+    <p>The page you requested could not be found.</p>
+    <a class="header-button" href="/">Go back home</a>
+  </main>
+</div>`))
+)
 
 // Handler returns the main HTTP handler
 func (a *App) Handler() http.Handler {
@@ -1603,6 +1775,8 @@ func (a *App) routes() {
 				// Invalidate settings cache
 				a.cacheDelete("settings_all")
 				a.cacheDelete(fmt.Sprintf("setting_%s", payload.Key))
+				a.cacheDelete("settings_public")
+				a.cacheDelete("settings_about")
 
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]string{"key": payload.Key, "value": payload.Value})
@@ -1793,6 +1967,9 @@ func (a *App) routes() {
 					return
 				}
 
+				// Invalidate about cache so SSR picks up changes
+				a.cacheDelete("settings_about")
+
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]interface{}{
 					"content": payload.Content,
@@ -1908,71 +2085,52 @@ func (a *App) routes() {
 		})(w, r)
 	}))
 
-	// Static files
+	// Static files + pre-rendered HTML fallbacks
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		p := r.URL.Path
-		if p == "/" {
-			data, err := staticFS.ReadFile("static/index.html")
-			if err != nil {
-				http.Error(w, "index not found", http.StatusNotFound)
-				return
-			}
-
-			etag := generateETag(data)
-			setStaticCacheHeaders(w, "index.html", etag)
-
-			// Check if client has cached version
-			if r.Header.Get("If-None-Match") == etag {
-				w.WriteHeader(http.StatusNotModified)
-				return
-			}
-
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(data)
+		if r.Method != http.MethodGet {
+			http.NotFound(w, r)
 			return
 		}
 
-		reqPath := strings.TrimPrefix(path.Clean(p), "/")
-		fp := filepath.Join("static", reqPath)
-		data, err := staticFS.ReadFile(fp)
+		reqPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if reqPath != "" {
+			fp := filepath.Join("static", reqPath)
+			if data, err := staticFS.ReadFile(fp); err == nil {
+				etag := generateETag(data)
+				setStaticCacheHeaders(w, reqPath, etag)
+				if r.Header.Get("If-None-Match") == etag {
+					w.WriteHeader(http.StatusNotModified)
+					return
+				}
+				if ctype := mime.TypeByExtension(filepath.Ext(fp)); ctype != "" {
+					w.Header().Set("Content-Type", ctype)
+				}
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write(data)
+				return
+			}
+		}
+
+		if a.servePreRenderedPage(w, r) {
+			return
+		}
+
+		index, err := staticFS.ReadFile("static/index.html")
 		if err != nil {
-			// Fallback to index.html for SPA routing
-			index, ierr := staticFS.ReadFile("static/index.html")
-			if ierr != nil {
-				http.NotFound(w, r)
-				return
-			}
-
-			etag := generateETag(index)
-			setStaticCacheHeaders(w, "index.html", etag)
-
-			// Check if client has cached version
-			if r.Header.Get("If-None-Match") == etag {
-				w.WriteHeader(http.StatusNotModified)
-				return
-			}
-
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(index)
+			http.NotFound(w, r)
 			return
 		}
 
-		etag := generateETag(data)
-		setStaticCacheHeaders(w, reqPath, etag)
-
-		// Check if client has cached version
+		etag := generateETag(index)
+		setStaticCacheHeaders(w, "index.html", etag)
 		if r.Header.Get("If-None-Match") == etag {
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
 
-		if ctype := mime.TypeByExtension(filepath.Ext(fp)); ctype != "" {
-			w.Header().Set("Content-Type", ctype)
-		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(data)
+		_, _ = w.Write(index)
 	})
 }
 
@@ -2034,6 +2192,427 @@ func (a *App) getPostsWithPrivacy(isAuthenticated bool) ([]Post, error) {
 		posts = append(posts, p)
 	}
 	return posts, nil
+}
+
+func (a *App) getPublicSettings() (siteSettings, error) {
+	const cacheKey = "settings_public"
+	if cached, ok := a.cacheGet(cacheKey); ok {
+		if settings, ok := cached.(siteSettings); ok {
+			return settings, nil
+		}
+	}
+
+	settings := siteSettings{
+		SiteTitle:    "Untitled Site",
+		IntroText:    "",
+		HeroImage:    "",
+		AboutEnabled: false,
+	}
+
+	rows, err := a.DB.Query(`SELECT key, value FROM settings WHERE key IN ('siteTitle','introText','heroImage','aboutEnabled')`)
+	if err != nil {
+		return settings, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var key, value string
+		if err := rows.Scan(&key, &value); err != nil {
+			return settings, err
+		}
+		switch key {
+		case "siteTitle":
+			if trimmed := strings.TrimSpace(value); trimmed != "" {
+				settings.SiteTitle = trimmed
+			}
+		case "introText":
+			settings.IntroText = strings.TrimSpace(value)
+		case "heroImage":
+			settings.HeroImage = strings.TrimSpace(value)
+		case "aboutEnabled":
+			settings.AboutEnabled = strings.EqualFold(strings.TrimSpace(value), "true")
+		}
+	}
+
+	a.cacheSet(cacheKey, settings, 30*time.Second)
+	return settings, nil
+}
+
+func (a *App) getAboutContent() (string, bool, error) {
+	const cacheKey = "settings_about"
+	if cached, ok := a.cacheGet(cacheKey); ok {
+		if payload, ok := cached.(aboutSettings); ok {
+			return payload.Content, payload.Enabled, nil
+		}
+	}
+
+	var content string
+	_ = a.DB.QueryRow(`SELECT value FROM settings WHERE key = 'aboutContent'`).Scan(&content)
+	content = strings.TrimSpace(content)
+
+	var enabledRaw string
+	_ = a.DB.QueryRow(`SELECT value FROM settings WHERE key = 'aboutEnabled'`).Scan(&enabledRaw)
+	enabled := strings.EqualFold(strings.TrimSpace(enabledRaw), "true")
+
+	payload := aboutSettings{Content: content, Enabled: enabled}
+
+	a.cacheSet(cacheKey, payload, 30*time.Second)
+	return content, enabled, nil
+}
+
+func (a *App) servePreRenderedPage(w http.ResponseWriter, r *http.Request) bool {
+	path := r.URL.Path
+
+	var (
+		body   string
+		meta   pageMeta
+		status = http.StatusOK
+		err    error
+	)
+
+	switch {
+	case path == "/":
+		body, meta, err = a.renderHomePage()
+	case path == "/archive":
+		body, meta, err = a.renderArchivePage()
+	case path == "/about":
+		body, meta, err = a.renderAboutPage()
+	case strings.HasPrefix(path, "/posts/"):
+		var found bool
+		body, meta, status, found, err = a.renderPostPage(strings.TrimPrefix(path, "/posts/"))
+		if err == nil && !found {
+			body, meta, status, err = a.renderNotFoundPage()
+		}
+	default:
+		return false
+	}
+
+	if err != nil {
+		a.Logger.Error("SSR render failed", "path", path, "error", err)
+		return false
+	}
+
+	if body == "" {
+		return false
+	}
+
+	page, err := a.wrapWithShell(body, meta)
+	if err != nil {
+		a.Logger.Error("failed to wrap SSR page", "path", path, "error", err)
+		return false
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(status)
+	_, _ = w.Write(page)
+	return true
+}
+
+func (a *App) renderHomePage() (string, pageMeta, error) {
+	settings, err := a.getPublicSettings()
+	if err != nil {
+		return "", pageMeta{}, err
+	}
+
+	posts, err := a.getPostsWithPrivacy(false)
+	if err != nil {
+		return "", pageMeta{}, err
+	}
+	if len(posts) > 10 {
+		posts = posts[:10]
+	}
+
+	items := make([]renderPostItem, 0, len(posts))
+	for _, p := range posts {
+		title := defaultPostTitle(p.Title, p.ID)
+		items = append(items, renderPostItem{
+			ID:    p.ID,
+			Title: title,
+			Date:  displayDate(p),
+		})
+	}
+
+	intro := settings.IntroText
+	if strings.TrimSpace(intro) == "" {
+		intro = "A text-only blog about design, systems, and quiet craft."
+	}
+
+	var buf bytes.Buffer
+	data := struct {
+		SiteTitle    string
+		IntroText    string
+		HeroImage    string
+		AboutEnabled bool
+		Posts        []renderPostItem
+	}{
+		SiteTitle:    settings.SiteTitle,
+		IntroText:    intro,
+		HeroImage:    settings.HeroImage,
+		AboutEnabled: settings.AboutEnabled,
+		Posts:        items,
+	}
+
+	if err := homePageTemplate.Execute(&buf, data); err != nil {
+		return "", pageMeta{}, err
+	}
+
+	meta := pageMeta{
+		title:       settings.SiteTitle,
+		description: truncateWithEllipsis(intro, 160),
+		canonical:   "/",
+	}
+	return buf.String(), meta, nil
+}
+
+func (a *App) renderArchivePage() (string, pageMeta, error) {
+	settings, err := a.getPublicSettings()
+	if err != nil {
+		return "", pageMeta{}, err
+	}
+
+	posts, err := a.getPostsWithPrivacy(false)
+	if err != nil {
+		return "", pageMeta{}, err
+	}
+
+	items := make([]renderPostItem, 0, len(posts))
+	for _, p := range posts {
+		items = append(items, renderPostItem{
+			ID:    p.ID,
+			Title: defaultPostTitle(p.Title, p.ID),
+			Date:  displayDate(p),
+		})
+	}
+
+	var buf bytes.Buffer
+	data := struct {
+		SiteTitle    string
+		AboutEnabled bool
+		Posts        []renderPostItem
+	}{
+		SiteTitle:    settings.SiteTitle,
+		AboutEnabled: settings.AboutEnabled,
+		Posts:        items,
+	}
+
+	if err := archivePageTemplate.Execute(&buf, data); err != nil {
+		return "", pageMeta{}, err
+	}
+
+	meta := pageMeta{
+		title:       buildPageTitle("Archive", settings.SiteTitle),
+		description: fmt.Sprintf("%d posts", len(items)),
+		canonical:   "/archive",
+	}
+	return buf.String(), meta, nil
+}
+
+func (a *App) renderAboutPage() (string, pageMeta, error) {
+	settings, err := a.getPublicSettings()
+	if err != nil {
+		return "", pageMeta{}, err
+	}
+
+	content, enabled, err := a.getAboutContent()
+	if err != nil {
+		return "", pageMeta{}, err
+	}
+
+	var buf bytes.Buffer
+	data := struct {
+		SiteTitle    string
+		AboutEnabled bool
+		Enabled      bool
+		Content      template.HTML
+	}{
+		SiteTitle:    settings.SiteTitle,
+		AboutEnabled: settings.AboutEnabled,
+		Enabled:      enabled,
+		Content:      template.HTML(content),
+	}
+
+	if err := aboutPageTemplate.Execute(&buf, data); err != nil {
+		return "", pageMeta{}, err
+	}
+
+	description := "Personal profile"
+	if strings.TrimSpace(content) != "" {
+		description = truncateWithEllipsis(stripHTML(content), 160)
+	}
+	meta := pageMeta{
+		title:       buildPageTitle("About", settings.SiteTitle),
+		description: description,
+		canonical:   "/about",
+	}
+	return buf.String(), meta, nil
+}
+
+func (a *App) renderPostPage(id string) (string, pageMeta, int, bool, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return "", pageMeta{}, http.StatusNotFound, false, nil
+	}
+
+	post, err := a.getPost(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", pageMeta{}, http.StatusNotFound, false, nil
+		}
+		return "", pageMeta{}, http.StatusInternalServerError, false, err
+	}
+
+	if post.IsPrivate {
+		return "", pageMeta{}, http.StatusNotFound, false, nil
+	}
+
+	settings, err := a.getPublicSettings()
+	if err != nil {
+		return "", pageMeta{}, http.StatusInternalServerError, false, err
+	}
+
+	title := defaultPostTitle(post.Title, post.ID)
+
+	var buf bytes.Buffer
+	data := struct {
+		SiteTitle    string
+		AboutEnabled bool
+		Title        string
+		Date         string
+		Content      template.HTML
+	}{
+		SiteTitle:    settings.SiteTitle,
+		AboutEnabled: settings.AboutEnabled,
+		Title:        title,
+		Date:         displayDate(post),
+		Content:      template.HTML(post.Content),
+	}
+
+	if err := postPageTemplate.Execute(&buf, data); err != nil {
+		return "", pageMeta{}, http.StatusInternalServerError, false, err
+	}
+
+	description := truncateWithEllipsis(stripHTML(post.Content), 160)
+	meta := pageMeta{
+		title:       buildPageTitle(title, settings.SiteTitle),
+		description: description,
+		canonical:   fmt.Sprintf("/posts/%s", id),
+	}
+	return buf.String(), meta, http.StatusOK, true, nil
+}
+
+func (a *App) renderNotFoundPage() (string, pageMeta, int, error) {
+	settings, err := a.getPublicSettings()
+	if err != nil {
+		return "", pageMeta{}, http.StatusInternalServerError, err
+	}
+	var buf bytes.Buffer
+	data := struct {
+		SiteTitle string
+	}{SiteTitle: settings.SiteTitle}
+	if err := notFoundTemplate.Execute(&buf, data); err != nil {
+		return "", pageMeta{}, http.StatusInternalServerError, err
+	}
+	meta := pageMeta{
+		title:       buildPageTitle("Not Found", settings.SiteTitle),
+		description: "The requested page could not be found.",
+	}
+	return buf.String(), meta, http.StatusNotFound, nil
+}
+
+func (a *App) wrapWithShell(content string, meta pageMeta) ([]byte, error) {
+	base, err := staticFS.ReadFile("static/index.html")
+	if err != nil {
+		return nil, err
+	}
+
+	html := string(base)
+
+	if meta.title != "" {
+		title := template.HTMLEscapeString(meta.title)
+		html = strings.Replace(html, "<title>Noet Editor</title>", "<title>"+title+"</title>", 1)
+	}
+
+	extraHead := ""
+	if meta.description != "" {
+		desc := template.HTMLEscapeString(meta.description)
+		extraHead += fmt.Sprintf("\n    <meta name=\"description\" content=\"%s\">", desc)
+	}
+	if meta.canonical != "" {
+		canon := template.HTMLEscapeString(meta.canonical)
+		extraHead += fmt.Sprintf("\n    <link rel=\"canonical\" href=\"%s\">", canon)
+	}
+	if extraHead != "" {
+		html = strings.Replace(html, "</head>", extraHead+"\n  </head>", 1)
+	}
+
+	if content != "" {
+		replacement := "<div id=\"root\">" + content + "</div>"
+		html = strings.Replace(html, "<div id=\"root\"></div>", replacement, 1)
+	}
+
+	return []byte(html), nil
+}
+
+func defaultPostTitle(title *string, id int64) string {
+	if title != nil {
+		trimmed := strings.TrimSpace(*title)
+		if trimmed != "" {
+			return trimmed
+		}
+	}
+	return fmt.Sprintf("Untitled Post %d", id)
+}
+
+func displayDate(p Post) string {
+	if !p.UpdatedAt.IsZero() {
+		return p.UpdatedAt.Format("January 2, 2006")
+	}
+	if !p.CreatedAt.IsZero() {
+		return p.CreatedAt.Format("January 2, 2006")
+	}
+	return ""
+}
+
+func buildPageTitle(pageTitle, siteTitle string) string {
+	siteTitle = strings.TrimSpace(siteTitle)
+	pageTitle = strings.TrimSpace(pageTitle)
+	if siteTitle == "" {
+		siteTitle = "Noet"
+	}
+	if pageTitle == "" {
+		return siteTitle
+	}
+	return fmt.Sprintf("%s — %s", pageTitle, siteTitle)
+}
+
+func stripHTML(input string) string {
+	var b strings.Builder
+	insideTag := false
+	for _, r := range input {
+		switch r {
+		case '<':
+			insideTag = true
+		case '>':
+			insideTag = false
+		default:
+			if !insideTag {
+				b.WriteRune(r)
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(strings.Fields(b.String()), " "))
+}
+
+func truncateWithEllipsis(input string, limit int) string {
+	runes := []rune(input)
+	if len(runes) <= limit {
+		return input
+	}
+	if limit <= 1 {
+		return string(runes[:limit])
+	}
+	return string(runes[:limit-1]) + "…"
 }
 
 // fetchOpenAIModels fetches available models from OpenAI API
