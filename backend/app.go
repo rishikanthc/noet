@@ -107,11 +107,27 @@ type aboutSettings struct {
 	Enabled bool   `json:"enabled"`
 }
 
+type metaTag struct {
+	Name     string
+	Property string
+	Content  string
+}
+
+type linkTag struct {
+	Rel   string
+	Href  string
+	Type  string
+	Title string
+}
+
 type pageRender struct {
-	body    string
-	meta    pageMeta
-	status  int
-	hydrate map[string]any
+	body     string
+	meta     pageMeta
+	status   int
+	hydrate  map[string]any
+	metaTags []metaTag
+	linkTags []linkTag
+	jsonLD   []string
 }
 
 var (
@@ -2155,9 +2171,40 @@ func (a *App) routes() {
 
 		fallback := index
 		if settings, serr := a.getPublicSettings(); serr == nil {
-			if wrapped, werr := a.wrapWithShell("", pageMeta{title: settings.SiteTitle}, map[string]any{
-				"settings": settings,
-			}); werr == nil {
+			scheme := "https"
+			if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+				scheme = proto
+			} else if r.TLS == nil {
+				scheme = "http"
+			}
+			host := r.Host
+			if host == "" {
+				host = "localhost"
+			}
+			siteBase := fmt.Sprintf("%s://%s", scheme, host)
+			currentPath := r.URL.Path
+			if currentPath == "" {
+				currentPath = "/"
+			}
+			currentURL := siteBase + currentPath
+
+			title := strings.TrimSpace(settings.SiteTitle)
+			if title == "" {
+				title = "Noet"
+			}
+
+			fallbackPage := pageRender{
+				meta: pageMeta{
+					title:       title,
+					description: "",
+					canonical:   currentURL,
+				},
+				hydrate: map[string]any{
+					"settings": settings,
+				},
+				metaTags: []metaTag{{Name: "robots", Content: "noindex, nofollow"}},
+			}
+			if wrapped, werr := a.wrapWithShell(fallbackPage); werr == nil {
 				fallback = wrapped
 			}
 		}
@@ -2303,6 +2350,21 @@ func (a *App) getAboutContent() (string, bool, error) {
 
 func (a *App) servePreRenderedPage(w http.ResponseWriter, r *http.Request) bool {
 	path := r.URL.Path
+	scheme := "https"
+	if proto := r.Header.Get("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	} else if r.TLS == nil {
+		scheme = "http"
+	}
+	host := r.Host
+	if host == "" {
+		host = "localhost"
+	}
+	siteBase := fmt.Sprintf("%s://%s", scheme, host)
+	if path == "" {
+		path = "/"
+	}
+	currentURL := siteBase + path
 
 	var (
 		page  pageRender
@@ -2312,15 +2374,15 @@ func (a *App) servePreRenderedPage(w http.ResponseWriter, r *http.Request) bool 
 
 	switch {
 	case path == "/":
-		page, err = a.renderHomePage()
+		page, err = a.renderHomePage(currentURL, siteBase)
 	case path == "/archive":
-		page, err = a.renderArchivePage()
+		page, err = a.renderArchivePage(currentURL, siteBase)
 	case path == "/about":
-		page, err = a.renderAboutPage()
+		page, err = a.renderAboutPage(currentURL, siteBase)
 	case strings.HasPrefix(path, "/posts/"):
-		page, found, err = a.renderPostPage(strings.TrimPrefix(path, "/posts/"))
+		page, found, err = a.renderPostPage(strings.TrimPrefix(path, "/posts/"), currentURL, siteBase)
 		if err == nil && !found {
-			page, err = a.renderNotFoundPage()
+			page, err = a.renderNotFoundPage(currentURL, siteBase)
 		}
 	default:
 		return false
@@ -2335,7 +2397,7 @@ func (a *App) servePreRenderedPage(w http.ResponseWriter, r *http.Request) bool 
 		return false
 	}
 
-	wrapped, err := a.wrapWithShell(page.body, page.meta, page.hydrate)
+	wrapped, err := a.wrapWithShell(page)
 	if err != nil {
 		a.Logger.Error("failed to wrap SSR page", "path", path, "error", err)
 		return false
@@ -2353,7 +2415,7 @@ func (a *App) servePreRenderedPage(w http.ResponseWriter, r *http.Request) bool 
 	return true
 }
 
-func (a *App) renderHomePage() (pageRender, error) {
+func (a *App) renderHomePage(currentURL, siteBase string) (pageRender, error) {
 	settings, err := a.getPublicSettings()
 	if err != nil {
 		return pageRender{}, err
@@ -2404,9 +2466,64 @@ func (a *App) renderHomePage() (pageRender, error) {
 	}
 
 	meta := pageMeta{
-		title:       settings.SiteTitle,
+		title:       strings.TrimSpace(settings.SiteTitle),
 		description: truncateWithEllipsis(intro, 160),
-		canonical:   "/",
+		canonical:   currentURL,
+	}
+
+	metaTitle := meta.title
+	if metaTitle == "" {
+		metaTitle = "Noet"
+		meta.title = metaTitle
+	}
+
+	absoluteHero := makeAbsoluteAssetURL(siteBase, settings.HeroImage)
+	cardType := "summary"
+	if absoluteHero != "" {
+		cardType = "summary_large_image"
+	}
+
+	metaTags := []metaTag{
+		{Name: "robots", Content: "index,follow"},
+		{Property: "og:title", Content: metaTitle},
+		{Property: "og:description", Content: meta.description},
+		{Property: "og:type", Content: "website"},
+		{Property: "og:url", Content: currentURL},
+		{Property: "og:site_name", Content: metaTitle},
+		{Name: "twitter:card", Content: cardType},
+		{Name: "twitter:title", Content: metaTitle},
+		{Name: "twitter:description", Content: meta.description},
+	}
+	if absoluteHero != "" {
+		metaTags = append(metaTags,
+			metaTag{Property: "og:image", Content: absoluteHero},
+			metaTag{Name: "twitter:image", Content: absoluteHero},
+		)
+	}
+
+	linkTags := []linkTag{
+		{Rel: "alternate", Href: siteBase + "/rss.xml", Type: "application/rss+xml", Title: metaTitle},
+	}
+
+	jsonLD := []string{}
+	if ld := buildJSONLD(map[string]any{
+		"@context":    "https://schema.org",
+		"@type":       "WebSite",
+		"name":        metaTitle,
+		"url":         siteBase,
+		"description": meta.description,
+	}); ld != "" {
+		jsonLD = append(jsonLD, ld)
+	}
+	if absoluteHero != "" {
+		if ld := buildJSONLD(map[string]any{
+			"@context": "https://schema.org",
+			"@type":    "ImageObject",
+			"url":      absoluteHero,
+			"name":     metaTitle,
+		}); ld != "" {
+			jsonLD = append(jsonLD, ld)
+		}
 	}
 
 	hydrate := map[string]any{
@@ -2416,13 +2533,16 @@ func (a *App) renderHomePage() (pageRender, error) {
 	}
 
 	return pageRender{
-		body:    buf.String(),
-		meta:    meta,
-		hydrate: hydrate,
+		body:     buf.String(),
+		meta:     meta,
+		hydrate:  hydrate,
+		metaTags: metaTags,
+		linkTags: linkTags,
+		jsonLD:   jsonLD,
 	}, nil
 }
 
-func (a *App) renderArchivePage() (pageRender, error) {
+func (a *App) renderArchivePage(currentURL, siteBase string) (pageRender, error) {
 	settings, err := a.getPublicSettings()
 	if err != nil {
 		return pageRender{}, err
@@ -2457,10 +2577,40 @@ func (a *App) renderArchivePage() (pageRender, error) {
 		return pageRender{}, err
 	}
 
+	metaTitle := buildPageTitle("Archive", settings.SiteTitle)
+	if strings.TrimSpace(metaTitle) == "" {
+		metaTitle = "Archive — Noet"
+	}
 	meta := pageMeta{
-		title:       buildPageTitle("Archive", settings.SiteTitle),
+		title:       metaTitle,
 		description: fmt.Sprintf("%d posts", len(items)),
-		canonical:   "/archive",
+		canonical:   currentURL,
+	}
+
+	metaTags := []metaTag{
+		{Name: "robots", Content: "index,follow"},
+		{Property: "og:title", Content: meta.title},
+		{Property: "og:description", Content: meta.description},
+		{Property: "og:type", Content: "website"},
+		{Property: "og:url", Content: currentURL},
+		{Property: "og:site_name", Content: strings.TrimSpace(settings.SiteTitle)},
+		{Name: "twitter:card", Content: "summary"},
+		{Name: "twitter:title", Content: meta.title},
+		{Name: "twitter:description", Content: meta.description},
+	}
+
+	linkTags := []linkTag{
+		{Rel: "alternate", Href: siteBase + "/rss.xml", Type: "application/rss+xml", Title: strings.TrimSpace(settings.SiteTitle)},
+	}
+
+	jsonLD := []string{}
+	if ld := buildJSONLD(map[string]any{
+		"@context": "https://schema.org",
+		"@type":    "CollectionPage",
+		"name":     meta.title,
+		"url":      currentURL,
+	}); ld != "" {
+		jsonLD = append(jsonLD, ld)
 	}
 
 	return pageRender{
@@ -2471,10 +2621,13 @@ func (a *App) renderArchivePage() (pageRender, error) {
 			"settings": settings,
 			"posts":    posts,
 		},
+		metaTags: metaTags,
+		linkTags: linkTags,
+		jsonLD:   jsonLD,
 	}, nil
 }
 
-func (a *App) renderAboutPage() (pageRender, error) {
+func (a *App) renderAboutPage(currentURL, siteBase string) (pageRender, error) {
 	settings, err := a.getPublicSettings()
 	if err != nil {
 		return pageRender{}, err
@@ -2506,10 +2659,43 @@ func (a *App) renderAboutPage() (pageRender, error) {
 	if strings.TrimSpace(content) != "" {
 		description = truncateWithEllipsis(stripHTML(content), 160)
 	}
+	metaTitle := buildPageTitle("About", settings.SiteTitle)
+	if strings.TrimSpace(metaTitle) == "" {
+		metaTitle = "About — Noet"
+	}
 	meta := pageMeta{
-		title:       buildPageTitle("About", settings.SiteTitle),
+		title:       metaTitle,
 		description: description,
-		canonical:   "/about",
+		canonical:   currentURL,
+	}
+
+	metaTags := []metaTag{
+		{Name: "robots", Content: "index,follow"},
+		{Property: "og:title", Content: meta.title},
+		{Property: "og:description", Content: meta.description},
+		{Property: "og:type", Content: "profile"},
+		{Property: "og:url", Content: currentURL},
+		{Property: "og:site_name", Content: strings.TrimSpace(settings.SiteTitle)},
+		{Name: "twitter:card", Content: "summary"},
+		{Name: "twitter:title", Content: meta.title},
+		{Name: "twitter:description", Content: meta.description},
+	}
+	if hero := makeAbsoluteAssetURL(siteBase, settings.HeroImage); hero != "" {
+		metaTags = append(metaTags,
+			metaTag{Property: "og:image", Content: hero},
+			metaTag{Name: "twitter:image", Content: hero},
+		)
+	}
+
+	jsonLD := []string{}
+	if ld := buildJSONLD(map[string]any{
+		"@context":    "https://schema.org",
+		"@type":       "AboutPage",
+		"name":        meta.title,
+		"url":         currentURL,
+		"description": meta.description,
+	}); ld != "" {
+		jsonLD = append(jsonLD, ld)
 	}
 
 	return pageRender{
@@ -2523,10 +2709,11 @@ func (a *App) renderAboutPage() (pageRender, error) {
 				Enabled: enabled,
 			},
 		},
+		metaTags: metaTags,
+		jsonLD:   jsonLD,
 	}, nil
 }
-
-func (a *App) renderPostPage(id string) (pageRender, bool, error) {
+func (a *App) renderPostPage(id string, currentURL, siteBase string) (pageRender, bool, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return pageRender{}, false, nil
@@ -2574,7 +2761,73 @@ func (a *App) renderPostPage(id string) (pageRender, bool, error) {
 	meta := pageMeta{
 		title:       buildPageTitle(title, settings.SiteTitle),
 		description: description,
-		canonical:   fmt.Sprintf("/posts/%s", id),
+		canonical:   currentURL,
+	}
+
+	image := firstImageSrc(post.Content)
+	if image != "" {
+		image = makeAbsoluteAssetURL(siteBase, image)
+	} else {
+		image = makeAbsoluteAssetURL(siteBase, settings.HeroImage)
+	}
+	cardType := "summary"
+	if image != "" {
+		cardType = "summary_large_image"
+	}
+
+	published := post.CreatedAt.UTC().Format(time.RFC3339)
+	modifiedTime := post.UpdatedAt
+	if modifiedTime.IsZero() {
+		modifiedTime = post.CreatedAt
+	}
+	modified := modifiedTime.UTC().Format(time.RFC3339)
+
+	metaTags := []metaTag{
+		{Name: "robots", Content: "index,follow"},
+		{Property: "og:title", Content: meta.title},
+		{Property: "og:description", Content: meta.description},
+		{Property: "og:type", Content: "article"},
+		{Property: "og:url", Content: currentURL},
+		{Property: "og:site_name", Content: strings.TrimSpace(settings.SiteTitle)},
+		{Property: "article:published_time", Content: published},
+		{Property: "article:modified_time", Content: modified},
+		{Name: "twitter:card", Content: cardType},
+		{Name: "twitter:title", Content: meta.title},
+		{Name: "twitter:description", Content: meta.description},
+	}
+	if image != "" {
+		metaTags = append(metaTags,
+			metaTag{Property: "og:image", Content: image},
+			metaTag{Name: "twitter:image", Content: image},
+		)
+	}
+
+	jsonLDData := map[string]any{
+		"@context":    "https://schema.org",
+		"@type":       "BlogPosting",
+		"headline":    title,
+		"description": description,
+		"mainEntityOfPage": map[string]any{
+			"@type": "WebPage",
+			"@id":   currentURL,
+		},
+		"datePublished": published,
+		"dateModified":  modified,
+		"publisher": map[string]any{
+			"@type": "Organization",
+			"name":  strings.TrimSpace(settings.SiteTitle),
+		},
+		"author": map[string]any{
+			"@type": "Person",
+			"name":  strings.TrimSpace(settings.SiteTitle),
+		},
+	}
+	if image != "" {
+		jsonLDData["image"] = []string{image}
+	}
+	jsonLD := []string{}
+	if ld := buildJSONLD(jsonLDData); ld != "" {
+		jsonLD = append(jsonLD, ld)
 	}
 
 	return pageRender{
@@ -2586,10 +2839,12 @@ func (a *App) renderPostPage(id string) (pageRender, bool, error) {
 			"settings": settings,
 			"post":     post,
 		},
+		metaTags: metaTags,
+		jsonLD:   jsonLD,
 	}, true, nil
 }
 
-func (a *App) renderNotFoundPage() (pageRender, error) {
+func (a *App) renderNotFoundPage(currentURL, _ string) (pageRender, error) {
 	settings, err := a.getPublicSettings()
 	if err != nil {
 		return pageRender{}, err
@@ -2604,6 +2859,14 @@ func (a *App) renderNotFoundPage() (pageRender, error) {
 	meta := pageMeta{
 		title:       buildPageTitle("Not Found", settings.SiteTitle),
 		description: "The requested page could not be found.",
+		canonical:   currentURL,
+	}
+	metaTags := []metaTag{
+		{Name: "robots", Content: "noindex, nofollow"},
+		{Property: "og:title", Content: meta.title},
+		{Property: "og:description", Content: meta.description},
+		{Property: "og:type", Content: "website"},
+		{Property: "og:url", Content: currentURL},
 	}
 	return pageRender{
 		body:   buf.String(),
@@ -2613,16 +2876,54 @@ func (a *App) renderNotFoundPage() (pageRender, error) {
 			"route":    "__not_found__",
 			"settings": settings,
 		},
+		metaTags: metaTags,
 	}, nil
 }
 
-func (a *App) wrapWithShell(content string, meta pageMeta, hydrate map[string]any) ([]byte, error) {
+func buildJSONLD(data any) string {
+	bytes, err := json.Marshal(data)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(bytes))
+}
+
+func makeAbsoluteAssetURL(siteBase, value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if strings.HasPrefix(value, "http://") || strings.HasPrefix(value, "https://") {
+		return value
+	}
+	if strings.HasPrefix(value, "//") {
+		return "https:" + value
+	}
+	base := strings.TrimRight(siteBase, "/")
+	if strings.HasPrefix(value, "/") {
+		return base + value
+	}
+	return base + "/" + value
+}
+
+var imgSrcRegex = regexp.MustCompile(`(?i)<img[^>]+src=["']([^"']+)["']`)
+
+func firstImageSrc(html string) string {
+	if matches := imgSrcRegex.FindStringSubmatch(html); len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
+
+func (a *App) wrapWithShell(page pageRender) ([]byte, error) {
 	base, err := staticFS.ReadFile("static/index.html")
 	if err != nil {
 		return nil, err
 	}
 
 	html := string(base)
+
+	meta := page.meta
 
 	if meta.title != "" {
 		title := template.HTMLEscapeString(meta.title)
@@ -2638,20 +2939,60 @@ func (a *App) wrapWithShell(content string, meta pageMeta, hydrate map[string]an
 		canon := template.HTMLEscapeString(meta.canonical)
 		extraHead += fmt.Sprintf("\n    <link rel=\"canonical\" href=\"%s\">", canon)
 	}
+	for _, link := range page.linkTags {
+		if link.Rel == "" || link.Href == "" {
+			continue
+		}
+		rel := template.HTMLEscapeString(link.Rel)
+		href := template.HTMLEscapeString(link.Href)
+		attrs := fmt.Sprintf(" rel=\"%s\" href=\"%s\"", rel, href)
+		if link.Type != "" {
+			typ := template.HTMLEscapeString(link.Type)
+			attrs += fmt.Sprintf(" type=\"%s\"", typ)
+		}
+		if link.Title != "" {
+			title := template.HTMLEscapeString(link.Title)
+			attrs += fmt.Sprintf(" title=\"%s\"", title)
+		}
+		extraHead += "\n    <link" + attrs + ">"
+	}
+	for _, tag := range page.metaTags {
+		content := strings.TrimSpace(tag.Content)
+		if content == "" {
+			continue
+		}
+		escapedContent := template.HTMLEscapeString(content)
+		if tag.Name != "" {
+			name := template.HTMLEscapeString(tag.Name)
+			extraHead += fmt.Sprintf("\n    <meta name=\"%s\" content=\"%s\">", name, escapedContent)
+		} else if tag.Property != "" {
+			property := template.HTMLEscapeString(tag.Property)
+			extraHead += fmt.Sprintf("\n    <meta property=\"%s\" content=\"%s\">", property, escapedContent)
+		}
+	}
+	for _, ld := range page.jsonLD {
+		ld = strings.TrimSpace(ld)
+		if ld == "" {
+			continue
+		}
+		safe := strings.ReplaceAll(ld, "</script>", "<\\/script>")
+		safe = strings.TrimSpace(safe)
+		extraHead += fmt.Sprintf("\n    <script type=\"application/ld+json\">%s</script>", safe)
+	}
 	if extraHead != "" {
 		html = strings.Replace(html, "</head>", extraHead+"\n  </head>", 1)
 	}
 
-	if len(hydrate) > 0 {
-		if payload, err := json.Marshal(hydrate); err == nil {
+	if len(page.hydrate) > 0 {
+		if payload, err := json.Marshal(page.hydrate); err == nil {
 			escaped := template.HTMLEscapeString(string(payload))
 			script := "\n    <script id=\"__NOET_DATA__\" type=\"application/json\">" + escaped + "</script>"
 			html = strings.Replace(html, "</head>", script+"\n  </head>", 1)
 		}
 	}
 
-	if content != "" {
-		replacement := "<div id=\"root\">" + content + "</div>"
+	if page.body != "" {
+		replacement := "<div id=\"root\">" + page.body + "</div>"
 		html = strings.Replace(html, "<div id=\"root\"></div>", replacement, 1)
 	}
 
