@@ -79,12 +79,35 @@ export function AppContent() {
 			if (resolvedTitle && resolvedTitle.trim()) {
 				title = `${resolvedTitle.trim()} — ${siteTitle}`;
 			} else {
-				title = `Untitled Post ${match} — ${siteTitle}`;
+				title = `Untitled — ${siteTitle}`;
 			}
 		}
 
 		document.title = title;
 	}, [path, match, queryClient, settings.siteTitle]);
+
+	// Set up a listener to update title when post data changes in cache
+	useEffect(() => {
+		if (!match) return;
+
+		const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+			if (
+				event?.type === 'updated' &&
+				event.query.queryKey[0] === 'posts' &&
+				event.query.queryKey[1] === 'detail' &&
+				event.query.queryKey[2] === match
+			) {
+				// Trigger title update by getting the latest data
+				const post = queryClient.getQueryData(postsQueryKeys.detail(match)) as { title?: string } | undefined;
+				const siteTitle = settings.siteTitle?.trim() || "Noet";
+				if (post?.title && post.title.trim()) {
+					document.title = `${post.title.trim()} — ${siteTitle}`;
+				}
+			}
+		});
+
+		return () => unsubscribe();
+	}, [match, queryClient, settings.siteTitle]);
 
 	// Show loading while checking setup status
 	if (setupLoading) {

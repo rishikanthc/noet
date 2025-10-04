@@ -141,6 +141,9 @@ export function PostEditor({ id }: PostEditorProps) {
 				if (response.ok) {
 					const note = await response.json();
 					if (!cancelled) {
+						// Update the query cache with the full post data so the title can be used
+						queryClient.setQueryData(postsQueryKeys.detail(id), note);
+
 						const initialContent = note.content || "";
 						setContent(initialContent);
 						latestContentRef.current = initialContent;
