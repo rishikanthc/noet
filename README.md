@@ -23,6 +23,9 @@ Sometimes you just want to write and publish without thinking about WordPress, s
 * **Single binary** deployment (Go backend + embedded frontend)
 * **SQLite database** (one file, easy backups)
 
+## Demo
+I use this for my personal blog. You can visit https://kindled.dev to checkout how the end blog looks. You can't test editting but can see how the blog is rendered.
+
 ## Tech stack
 
 * **Backend**: Go (single binary, SQLite)
